@@ -5,9 +5,9 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.core.toolkit.StringUtils;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import com.example.farm.common.api.ResultCode;
 import com.example.farm.common.exception.BusinessException;
 import com.example.farm.common.utils.JwtUtils;
+import com.example.farm.common.utils.LoginProtectUtil;
 import com.example.farm.common.utils.PasswordMigrationUtil;
 import com.example.farm.entity.FarmUser;
 import com.example.farm.entity.dto.*;
@@ -35,6 +35,7 @@ public class FarmUserServiceImpl extends ServiceImpl<FarmUserMapper, FarmUser> i
 
     private final PasswordEncoder passwordEncoder;
     private final FarmUserMapper farmUserMapper;
+    private final LoginProtectUtil loginProtectUtil;
 
     @Value("${jwt.expire-time:604800000}")
     private Long jwtExpireTime;
@@ -42,21 +43,41 @@ public class FarmUserServiceImpl extends ServiceImpl<FarmUserMapper, FarmUser> i
     @Override
     @Transactional
     public LoginResultDTO login(UserLoginDTO loginDTO) {
-        // 1. 查询用户
-        FarmUser user = findByUsername(loginDTO.getUsername());
+        String username = loginDTO.getUsername();
+        
+        // 1. 检查账号是否被锁定（防暴力破解）
+        if (loginProtectUtil.isLocked(username)) {
+            long remainingMinutes = loginProtectUtil.getRemainingLockTime(username);
+            throw new BusinessException("账号已锁定，请 " + remainingMinutes + " 分钟后重试");
+        }
+        
+        // 2. 查询用户
+        FarmUser user = findByUsername(username);
         if (user == null) {
+            // 记录失败次数
+            loginProtectUtil.recordLoginFail(username);
             throw new BusinessException("账号或密码错误");
         }
 
-        // 2. 校验密码（支持明文自动迁移）
+        // 3. 校验密码（支持明文自动迁移）
         PasswordMigrationUtil.MigrateResult result = PasswordMigrationUtil.matchesAndMigrate(
                 loginDTO.getPassword(),
                 user.getPasswordHash()
         );
 
         if (!result.isMatches()) {
-            throw new BusinessException("账号或密码错误");
+            // 记录失败次数
+            int failCount = loginProtectUtil.recordLoginFail(username);
+            int remainingAttempts = 5 - failCount;
+            if (remainingAttempts > 0) {
+                throw new BusinessException("账号或密码错误，还剩 " + remainingAttempts + " 次机会");
+            } else {
+                throw new BusinessException("账号已锁定，请 15 分钟后重试");
+            }
         }
+        
+        // 登录成功，清除失败记录
+        loginProtectUtil.clearLoginFail(username);
 
         // 3. 如果需要迁移（明文->密文），自动更新数据库
         if (result.needMigration()) {

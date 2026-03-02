@@ -10,6 +10,19 @@ spring:
     url: jdbc:mysql://localhost:3306/farm?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
     username: farm
     password: YBW5esRQwm4fm3X2
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password: redis_ZSeBDY      # 如果没有密码留空
+      database: 0
+      timeout: 5s
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+          max-wait: 5s
 mybatis-plus:
   configuration:
     # 开启驼峰命名自动映射 (例如 db 中的 created_at 会自动映射到 Java 的 createdAt)

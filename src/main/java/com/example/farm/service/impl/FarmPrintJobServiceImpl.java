@@ -144,7 +144,7 @@ public class FarmPrintJobServiceImpl extends ServiceImpl<FarmPrintJobMapper, Far
             printer.setStatus("PRINTING");
             farmPrinterService.updateById(printer);
 
-            log.info("🎉 手动派单成功！机器已轰鸣！");
+            log.info("🎉 手动派单成功！机器开始打印！");
             return true;
         } else {
             throw new RuntimeException("物理机接收文件失败，请检查机器网络");
