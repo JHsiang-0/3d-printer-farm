@@ -1,0 +1,65 @@
+# Compiled output
+/target/
+!/src/main/**/target/
+!/src/test/**/target/
+/build/
+!/src/main/**/build/
+!/src/test/**/build/
+
+# Maven
+.mvn/wrapper/maven-wrapper.jar
+HELP.md
+
+# IDE - IntelliJ IDEA
+.idea/
+*.iws
+*.iml
+*.ipr
+
+# IDE - Eclipse/STS
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings/
+.springBeans
+.sts4-cache/
+
+# IDE - NetBeans
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+# IDE - VS Code
+.vscode/
+
+# Configuration files with sensitive data
+# 注意：生产环境应该使用 application-prod.yml 并通过环境变量注入
+/src/main/resources/application-local.yml
+/src/main/resources/application-dev.yml
+/src/main/resources/application-prod.yml
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.pid
+*.seed
+*.pid.lock
+
+# OS generated files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# SQL scripts (临时数据库清理脚本)
+cleanup_*.sql
+db_cleanup.sql
+
+# Test generated files
+/src/test/resources/
+!/src/test/java/

@@ -1,0 +1,33 @@
+spring:
+  application:
+    name: Farm
+  servlet:
+    multipart:
+      max-file-size: 200MB      # 单个文件最大限制 (给 G-code 放宽到 200MB)
+      max-request-size: 250MB
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/farm?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+    username: farm
+    password: YBW5esRQwm4fm3X2
+mybatis-plus:
+  configuration:
+    # 开启驼峰命名自动映射 (例如 db 中的 created_at 会自动映射到 Java 的 createdAt)
+    map-underscore-to-camel-case: true
+    # 打印 SQL 日志，方便开发时调试
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+rustfs:
+  endpoint: http://127.0.0.1:9000
+  access-key: rustfsadmin
+  secret-key: rustfsadmin_fzSNXB
+  bucket: farm   # 注意：S3 的 bucket 名字不能有下划线，最好用中划线
+jwt:
+  # JWT 密钥（生产环境请使用复杂随机字符串，并通过环境变量注入）
+  secret-key: ${JWT_SECRET_KEY:Farm3DPrinterSuperSecretKey}
+  # Token 有效期：7天（单位：毫秒）
+  expire-time: 604800000
+
+admin:
+  # 管理员操作密钥（用于密码批量迁移等敏感操作）
+  # 生产环境请通过环境变量注入复杂随机字符串
+  secret-key: ${ADMIN_SECRET_KEY:FarmAdmin2024}
