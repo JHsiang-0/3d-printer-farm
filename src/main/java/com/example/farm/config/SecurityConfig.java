@@ -44,10 +44,11 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 // 配置请求授权
                 .authorizeHttpRequests(auth -> auth
-                        // 登录接口允许匿名访问
+                        // 认证相关接口允许匿名访问
                         .requestMatchers("/api/v1/auth/login").permitAll()
-                        // 注册接口允许匿名访问（如不需要开放注册，可删除此行）
                         .requestMatchers("/api/v1/auth/register").permitAll()
+                        .requestMatchers("/api/v1/auth/check-username").permitAll()
+                        .requestMatchers("/api/v1/auth/check-email").permitAll()
                         // 管理员接口（带密钥保护，允许匿名访问）
                         .requestMatchers("/api/v1/auth/admin/**").permitAll()
                         // WebSocket 监控大屏允许访问
