@@ -49,7 +49,7 @@ public class PrinterCacheServiceImpl implements PrinterCacheService {
             return null;
         }
         String key = RedisKeyConstant.getKey(RedisKeyConstant.PRINTER_STATUS, printerId);
-        return redisUtil.get(key);
+        return redisUtil.get(key, MoonrakerStatusDTO.class);
     }
 
     @Override
@@ -163,6 +163,6 @@ public class PrinterCacheServiceImpl implements PrinterCacheService {
     @Override
     public Object getSystemStats() {
         String key = RedisKeyConstant.getKey(RedisKeyConstant.SYSTEM_STATS, "overview");
-        return redisUtil.get(key);
+        return redisUtil.get(key, Object.class);
     }
 }

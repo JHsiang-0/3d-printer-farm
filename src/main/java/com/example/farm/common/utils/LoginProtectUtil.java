@@ -50,13 +50,18 @@ public class LoginProtectUtil {
      */
     public boolean isLocked(String username) {
         String key = RedisKeyConstant.getKey(RedisKeyConstant.LOGIN_FAIL_COUNT, username);
-        Integer count = redisUtil.get(key);
+        String countStr = redisUtil.getString(key);
         
-        if (count == null) {
+        if (countStr == null) {
             return false;
         }
         
-        return count >= MAX_FAIL_COUNT;
+        try {
+            int count = Integer.parseInt(countStr);
+            return count >= MAX_FAIL_COUNT;
+        } catch (NumberFormatException e) {
+            return false;
+        }
     }
 
     /**
@@ -94,7 +99,14 @@ public class LoginProtectUtil {
      */
     public int getFailCount(String username) {
         String key = RedisKeyConstant.getKey(RedisKeyConstant.LOGIN_FAIL_COUNT, username);
-        Integer count = redisUtil.get(key);
-        return count != null ? count : 0;
+        String countStr = redisUtil.getString(key);
+        if (countStr == null) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(countStr);
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 }

@@ -1,5 +1,7 @@
 package com.example.farm.common.utils;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -10,22 +12,25 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Redis 工具类
+ * 使用 String 存储，手动进行 JSON 序列化
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class RedisUtil {
 
-    private final RedisTemplate<String, Object> redisTemplate;
+    private final RedisTemplate<String, String> redisTemplate;
+    private final ObjectMapper redisObjectMapper;
 
     /**
-     * 设置缓存
+     * 设置缓存（对象自动转为 JSON）
      */
     public void set(String key, Object value) {
         try {
-            redisTemplate.opsForValue().set(key, value);
-        } catch (Exception e) {
-            log.error("Redis set error: key={}, error={}", key, e.getMessage());
+            String json = redisObjectMapper.writeValueAsString(value);
+            redisTemplate.opsForValue().set(key, json);
+        } catch (JsonProcessingException e) {
+            log.error("Redis set JSON error: key={}, error={}", key, e.getMessage());
         }
     }
 
@@ -34,19 +39,23 @@ public class RedisUtil {
      */
     public void set(String key, Object value, long timeout, TimeUnit unit) {
         try {
-            redisTemplate.opsForValue().set(key, value, timeout, unit);
-        } catch (Exception e) {
-            log.error("Redis set error: key={}, error={}", key, e.getMessage());
+            String json = redisObjectMapper.writeValueAsString(value);
+            redisTemplate.opsForValue().set(key, json, timeout, unit);
+        } catch (JsonProcessingException e) {
+            log.error("Redis set JSON error: key={}, error={}", key, e.getMessage());
         }
     }
 
     /**
-     * 获取缓存
+     * 获取缓存（JSON 转为对象）
      */
-    @SuppressWarnings("unchecked")
-    public <T> T get(String key) {
+    public <T> T get(String key, Class<T> clazz) {
         try {
-            return (T) redisTemplate.opsForValue().get(key);
+            String json = redisTemplate.opsForValue().get(key);
+            if (json == null) {
+                return null;
+            }
+            return redisObjectMapper.readValue(json, clazz);
         } catch (Exception e) {
             log.error("Redis get error: key={}, error={}", key, e.getMessage());
             return null;
@@ -54,103 +63,86 @@ public class RedisUtil {
     }
 
     /**
+     * 获取原始字符串缓存
+     */
+    public String getString(String key) {
+        return redisTemplate.opsForValue().get(key);
+    }
+
+    /**
+     * 设置字符串缓存
+     */
+    public void setString(String key, String value) {
+        redisTemplate.opsForValue().set(key, value);
+    }
+
+    /**
+     * 设置字符串缓存并指定过期时间
+     */
+    public void setString(String key, String value, long timeout, TimeUnit unit) {
+        redisTemplate.opsForValue().set(key, value, timeout, unit);
+    }
+
+    /**
      * 删除缓存
      */
     public void delete(String key) {
-        try {
-            redisTemplate.delete(key);
-        } catch (Exception e) {
-            log.error("Redis delete error: key={}, error={}", key, e.getMessage());
-        }
+        redisTemplate.delete(key);
     }
 
     /**
      * 批量删除
      */
     public void delete(Collection<String> keys) {
-        try {
-            redisTemplate.delete(keys);
-        } catch (Exception e) {
-            log.error("Redis delete error: keys={}, error={}", keys, e.getMessage());
-        }
+        redisTemplate.delete(keys);
     }
 
     /**
      * 设置过期时间
      */
     public boolean expire(String key, long timeout, TimeUnit unit) {
-        try {
-            return Boolean.TRUE.equals(redisTemplate.expire(key, timeout, unit));
-        } catch (Exception e) {
-            log.error("Redis expire error: key={}, error={}", key, e.getMessage());
-            return false;
-        }
+        return Boolean.TRUE.equals(redisTemplate.expire(key, timeout, unit));
     }
 
     /**
      * 获取过期时间
      */
     public Long getExpire(String key, TimeUnit unit) {
-        try {
-            return redisTemplate.getExpire(key, unit);
-        } catch (Exception e) {
-            log.error("Redis getExpire error: key={}, error={}", key, e.getMessage());
-            return null;
-        }
+        return redisTemplate.getExpire(key, unit);
     }
 
     /**
      * 是否存在 Key
      */
     public boolean hasKey(String key) {
-        try {
-            return Boolean.TRUE.equals(redisTemplate.hasKey(key));
-        } catch (Exception e) {
-            log.error("Redis hasKey error: key={}, error={}", key, e.getMessage());
-            return false;
-        }
+        return Boolean.TRUE.equals(redisTemplate.hasKey(key));
     }
 
     /**
      * 自增
      */
     public Long increment(String key, long delta) {
-        try {
-            return redisTemplate.opsForValue().increment(key, delta);
-        } catch (Exception e) {
-            log.error("Redis increment error: key={}, error={}", key, e.getMessage());
-            return null;
-        }
+        return redisTemplate.opsForValue().increment(key, delta);
     }
 
     /**
      * 自增并设置过期时间
      */
     public Long increment(String key, long delta, long timeout, TimeUnit unit) {
-        try {
-            Long value = redisTemplate.opsForValue().increment(key, delta);
-            if (value != null && value == 1) {
-                // 第一次设置，添加过期时间
-                expire(key, timeout, unit);
-            }
-            return value;
-        } catch (Exception e) {
-            log.error("Redis increment error: key={}, error={}", key, e.getMessage());
-            return null;
+        Long value = redisTemplate.opsForValue().increment(key, delta);
+        if (value != null && value == delta) {
+            // 第一次设置，添加过期时间
+            expire(key, timeout, unit);
         }
+        return value;
     }
 
     /**
      * 分布式锁（尝试获取）
      */
     public boolean tryLock(String key, String value, long timeout, TimeUnit unit) {
-        try {
-            Boolean success = redisTemplate.opsForValue().setIfAbsent(key, value, timeout, unit);
-            return Boolean.TRUE.equals(success);
-        } catch (Exception e) {
-            log.error("Redis tryLock error: key={}, error={}", key, e.getMessage());
-            return false;
-        }
+        Boolean success = redisTemplate.opsForValue().setIfAbsent(key, value, timeout, unit);
+        return Boolean.TRUE.equals(success);
     }
 
     /**
@@ -164,8 +156,7 @@ public class RedisUtil {
      * 获取分布式锁的值
      */
     public String getLockValue(String key) {
-        Object value = get(key);
-        return value != null ? value.toString() : null;
+        return getString(key);
     }
 
     /**
@@ -173,8 +164,9 @@ public class RedisUtil {
      */
     public void convertAndSend(String channel, Object message) {
         try {
-            redisTemplate.convertAndSend(channel, message);
-        } catch (Exception e) {
+            String json = redisObjectMapper.writeValueAsString(message);
+            redisTemplate.convertAndSend(channel, json);
+        } catch (JsonProcessingException e) {
             log.error("Redis convertAndSend error: channel={}, error={}", channel, e.getMessage());
         }
     }
