@@ -10,6 +10,7 @@ import com.example.farm.mapper.FarmPrintFileMapper;
 import com.example.farm.mapper.FarmPrintJobMapper;
 import com.example.farm.service.FarmPrintJobService;
 import com.example.farm.service.FarmPrinterService;
+import com.example.farm.common.exception.BusinessException;
 import com.example.farm.common.utils.MoonrakerApiClient;
 import com.example.farm.common.utils.RustFsClient;
 import lombok.RequiredArgsConstructor;
@@ -61,13 +62,28 @@ public class FarmPrintJobServiceImpl extends ServiceImpl<FarmPrintJobMapper, Far
     @Override
     @Transactional
     public Long createJob(FarmPrintJobCreateDTO req) {
+        // 兼容旧接口，获取当前登录用户
+        Long currentUserId = com.example.farm.common.utils.SecurityContextUtil.getCurrentUserId();
+        return createJob(req, currentUserId);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Long createJob(FarmPrintJobCreateDTO req, Long userId) {
+        // 1. 参数校验
+        if (userId == null) {
+            throw new BusinessException("用户未登录，无法创建任务");
+        }
+        
+        // 2. 校验文件是否存在
         FarmPrintFile fileRecord = farmPrintFileMapper.selectById(req.getFileId());
         if (fileRecord == null) {
-            throw new RuntimeException("所选的切片文件不存在！");
+            throw new BusinessException("所选的切片文件不存在！");
         }
 
+        // 3. 构建打印任务
         FarmPrintJob job = new FarmPrintJob();
-        job.setUserId(1L);
+        job.setUserId(userId);
         job.setFileId(req.getFileId());
         job.setFileUrl(fileRecord.getFileUrl());
         job.setEstTime(fileRecord.getEstTime());
@@ -77,10 +93,11 @@ public class FarmPrintJobServiceImpl extends ServiceImpl<FarmPrintJobMapper, Far
         job.setPriority(req.getPriority() != null ? req.getPriority() : 0);
         job.setProgress(BigDecimal.ZERO);
 
+        // 4. 保存任务
         this.save(job);
 
-        log.info("📝 生产订单已下达！任务ID: {}, 要求耗材: {}, 喷嘴: {}mm",
-                job.getId(), job.getMaterialType(), job.getNozzleSize());
+        log.info("📝 生产订单已下达！任务ID: {}, 用户ID: {}, 要求耗材: {}, 喷嘴: {}mm",
+                job.getId(), userId, job.getMaterialType(), job.getNozzleSize());
 
         return job.getId();
     }

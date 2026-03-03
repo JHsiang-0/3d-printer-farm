@@ -3,6 +3,8 @@ package com.example.farm.entity.dto;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
+import java.math.BigDecimal;
+
 /**
  * 修改打印机请求 DTO
  */
@@ -27,4 +29,10 @@ public class FarmPrinterUpdateDTO {
 
     @Schema(description = "上位机 API 通信密钥")
     private String apiKey;
+
+    @Schema(description = "喷嘴大小")
+    private String currentMaterial;
+
+    @Schema(description = "耗材直径")
+    private BigDecimal nozzleSize;
 }

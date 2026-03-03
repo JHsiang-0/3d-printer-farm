@@ -4,8 +4,9 @@ import com.example.farm.common.constant.RedisKeyConstant;
 import com.example.farm.common.utils.RedisUtil;
 import com.example.farm.entity.FarmPrinter;
 import com.example.farm.entity.dto.MoonrakerStatusDTO;
-import com.example.farm.service.FarmPrinterService;
+import com.example.farm.mapper.FarmPrinterMapper;
 import com.example.farm.service.PrinterCacheService;
+import com.fasterxml.jackson.core.type.TypeReference;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -25,7 +26,7 @@ import java.util.stream.Collectors;
 public class PrinterCacheServiceImpl implements PrinterCacheService {
 
     private final RedisUtil redisUtil;
-    private final FarmPrinterService farmPrinterService;
+    private final FarmPrinterMapper farmPrinterMapper;
 
     // 缓存过期时间：10秒
     private static final long STATUS_CACHE_TTL = 10;
@@ -91,8 +92,8 @@ public class PrinterCacheServiceImpl implements PrinterCacheService {
                 return false;
             }
 
-            // 获取锁成功，更新数据库
-            farmPrinterService.updateById(printer);
+            // 获取锁成功，更新数据库（直接使用Mapper，避免循环依赖）
+            farmPrinterMapper.updateById(printer);
             log.debug("打印机状态更新成功，printerId={}, status={}", printerId, printer.getStatus());
             return true;
 
@@ -125,30 +126,106 @@ public class PrinterCacheServiceImpl implements PrinterCacheService {
 
     @Override
     public void recordStatusHistory(Long printerId, MoonrakerStatusDTO status) {
-        // TODO: 使用 Redis List 存储历史记录，待实现
-        // String key = RedisKeyConstant.getKey(RedisKeyConstant.PRINTER_HISTORY, printerId);
-        // redisTemplate.opsForList().leftPush(key, status);
-        // redisTemplate.opsForList().trim(key, 0, HISTORY_KEEP_COUNT - 1);
-        // redisUtil.expire(key, 24, TimeUnit.HOURS);
+        if (printerId == null || status == null) {
+            return;
+        }
+        try {
+            String key = RedisKeyConstant.getKey(RedisKeyConstant.PRINTER_HISTORY, printerId);
+            // 从左侧插入新记录（最新的在前面）
+            redisUtil.listLeftPush(key, status);
+            // 修剪列表，只保留最近 HISTORY_KEEP_COUNT 条
+            redisUtil.listTrim(key, 0, HISTORY_KEEP_COUNT - 1);
+            // 设置过期时间为 24 小时
+            redisUtil.expire(key, 24, TimeUnit.HOURS);
+            log.debug("📊 记录打印机状态历史: printerId={}, state={}", printerId, status.getState());
+        } catch (Exception e) {
+            log.error("❌ 记录状态历史失败: printerId={}", printerId, e);
+        }
     }
 
     @Override
     public List<MoonrakerStatusDTO> getStatusHistory(Long printerId, int count) {
-        // TODO: 待实现
-        return new ArrayList<>();
+        if (printerId == null || count <= 0) {
+            return new ArrayList<>();
+        }
+        try {
+            String key = RedisKeyConstant.getKey(RedisKeyConstant.PRINTER_HISTORY, printerId);
+            // 获取前 count 条记录（最新的在前面）
+            return redisUtil.listRange(key, 0, count - 1, MoonrakerStatusDTO.class);
+        } catch (Exception e) {
+            log.error("❌ 获取状态历史失败: printerId={}, count={}", printerId, count, e);
+            return new ArrayList<>();
+        }
     }
 
     @Override
     public long getOnlinePrinterCount() {
-        // TODO: 通过 Redis 统计在线数量，待实现
-        // 临时返回所有打印机数量
-        return farmPrinterService.count();
+        try {
+            Long count = redisUtil.setSize(RedisKeyConstant.PRINTER_ONLINE_SET);
+            return count != null ? count : 0;
+        } catch (Exception e) {
+            log.error("❌ 获取在线打印机数量失败", e);
+            return 0;
+        }
     }
 
     @Override
     public long getBusyPrinterCount() {
-        // TODO: 通过 Redis 统计忙碌数量，待实现
-        return 0;
+        try {
+            Long count = redisUtil.setSize(RedisKeyConstant.PRINTER_BUSY_SET);
+            return count != null ? count : 0;
+        } catch (Exception e) {
+            log.error("❌ 获取忙碌打印机数量失败", e);
+            return 0;
+        }
+    }
+
+    @Override
+    public void markPrinterOnline(Long printerId) {
+        if (printerId == null) return;
+        try {
+            redisUtil.setAdd(RedisKeyConstant.PRINTER_ONLINE_SET, printerId.toString());
+            log.debug("✅ 标记打印机在线: printerId={}", printerId);
+        } catch (Exception e) {
+            log.error("❌ 标记打印机在线失败: printerId={}", printerId, e);
+        }
+    }
+
+    @Override
+    public void markPrinterOffline(Long printerId) {
+        if (printerId == null) return;
+        try {
+            redisUtil.setRemove(RedisKeyConstant.PRINTER_ONLINE_SET, printerId.toString());
+            // 离线时也从忙碌集合中移除
+            redisUtil.setRemove(RedisKeyConstant.PRINTER_BUSY_SET, printerId.toString());
+            log.debug("❌ 标记打印机离线: printerId={}", printerId);
+        } catch (Exception e) {
+            log.error("❌ 标记打印机离线失败: printerId={}", printerId, e);
+        }
+    }
+
+    @Override
+    public void markPrinterBusy(Long printerId) {
+        if (printerId == null) return;
+        try {
+            // 忙碌必须先在线
+            redisUtil.setAdd(RedisKeyConstant.PRINTER_ONLINE_SET, printerId.toString());
+            redisUtil.setAdd(RedisKeyConstant.PRINTER_BUSY_SET, printerId.toString());
+            log.debug("🔄 标记打印机忙碌: printerId={}", printerId);
+        } catch (Exception e) {
+            log.error("❌ 标记打印机忙碌失败: printerId={}", printerId, e);
+        }
+    }
+
+    @Override
+    public void markPrinterIdle(Long printerId) {
+        if (printerId == null) return;
+        try {
+            redisUtil.setRemove(RedisKeyConstant.PRINTER_BUSY_SET, printerId.toString());
+            log.debug("⏸️ 标记打印机空闲: printerId={}", printerId);
+        } catch (Exception e) {
+            log.error("❌ 标记打印机空闲失败: printerId={}", printerId, e);
+        }
     }
 
     @Override
@@ -164,5 +241,39 @@ public class PrinterCacheServiceImpl implements PrinterCacheService {
     public Object getSystemStats() {
         String key = RedisKeyConstant.getKey(RedisKeyConstant.SYSTEM_STATS, "overview");
         return redisUtil.get(key, Object.class);
+    }
+
+    @Override
+    public List<FarmPrinter> getAllPrintersFromCache() {
+        String key = RedisKeyConstant.PRINTER_LIST;
+        log.info("🔍 尝试从Redis获取打印机列表: key={}", key);
+        // 使用 TypeReference 正确反序列化泛型集合
+        List<FarmPrinter> result = redisUtil.get(key, new TypeReference<List<FarmPrinter>>() {});
+        if (result == null) {
+            log.info("⚠️ Redis缓存未命中: key={}", key);
+        } else {
+            log.info("✅ Redis缓存命中: key={}, size={}", key, result.size());
+        }
+        return result;
+    }
+
+    @Override
+    public void cacheAllPrinters(List<FarmPrinter> printers) {
+        if (printers == null || printers.isEmpty()) {
+            log.warn("⚠️ 缓存打印机列表失败: 列表为空");
+            return;
+        }
+        String key = RedisKeyConstant.PRINTER_LIST;
+        log.info("💾 正在缓存打印机列表到Redis: key={}, size={}", key, printers.size());
+        // 缓存1小时，打印机列表不会频繁变化
+        redisUtil.set(key, printers, 1, TimeUnit.HOURS);
+        log.info("✅ 打印机列表缓存完成: key={}", key);
+    }
+
+    @Override
+    public void refreshPrinterCache() {
+        String key = RedisKeyConstant.PRINTER_LIST;
+        redisUtil.delete(key);
+        log.info("🔄 打印机列表缓存已刷新");
     }
 }

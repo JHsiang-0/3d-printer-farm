@@ -83,18 +83,46 @@ public interface PrinterCacheService {
     List<MoonrakerStatusDTO> getStatusHistory(Long printerId, int count);
 
     /**
-     * 获取在线打印机数量
+     * 获取在线打印机数量（从 Redis 统计）
      *
      * @return 在线数量
      */
     long getOnlinePrinterCount();
 
     /**
-     * 获取忙碌打印机数量
+     * 获取忙碌打印机数量（从 Redis 统计）
      *
      * @return 忙碌数量
      */
     long getBusyPrinterCount();
+
+    /**
+     * 标记打印机为在线状态
+     *
+     * @param printerId 打印机ID
+     */
+    void markPrinterOnline(Long printerId);
+
+    /**
+     * 标记打印机为离线状态
+     *
+     * @param printerId 打印机ID
+     */
+    void markPrinterOffline(Long printerId);
+
+    /**
+     * 标记打印机为忙碌状态（正在打印）
+     *
+     * @param printerId 打印机ID
+     */
+    void markPrinterBusy(Long printerId);
+
+    /**
+     * 标记打印机为空闲状态
+     *
+     * @param printerId 打印机ID
+     */
+    void markPrinterIdle(Long printerId);
 
     /**
      * 缓存系统统计数据
@@ -109,4 +137,23 @@ public interface PrinterCacheService {
      * @return 统计数据
      */
     Object getSystemStats();
+
+    /**
+     * 从缓存获取所有打印机列表
+     *
+     * @return 打印机列表，缓存未命中返回空列表
+     */
+    List<FarmPrinter> getAllPrintersFromCache();
+
+    /**
+     * 缓存所有打印机列表
+     *
+     * @param printers 打印机列表
+     */
+    void cacheAllPrinters(List<FarmPrinter> printers);
+
+    /**
+     * 刷新打印机缓存（当打印机增删改时调用）
+     */
+    void refreshPrinterCache();
 }

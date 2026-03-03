@@ -10,21 +10,29 @@ import com.example.farm.entity.dto.FarmPrinterQueryDTO;
 import com.example.farm.entity.dto.FarmPrinterUpdateDTO;
 import com.example.farm.mapper.FarmPrinterMapper;
 import com.example.farm.service.FarmPrinterService;
+import com.example.farm.service.PrinterCacheService;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.math.BigDecimal;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 @Service
+@RequiredArgsConstructor
 public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmPrinter> implements FarmPrinterService {
+
+    private final PrinterCacheService printerCacheService;
+    private final FarmPrinterMapper farmPrinterMapper;
 
     @Override
     public Page<FarmPrinter> pagePrinters(FarmPrinterQueryDTO queryDTO) {
@@ -71,6 +79,9 @@ public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmP
 
         // 4. 保存到数据库 (MyBatis-Plus 会自动帮我们填充 createdAt 时间)
         this.save(printer);
+
+        // 5. 刷新打印机列表缓存
+        printerCacheService.refreshPrinterCache();
     }
 
     @Override
@@ -97,9 +108,14 @@ public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmP
         existingPrinter.setMacAddress(dto.getMacAddress());
         existingPrinter.setFirmwareType(dto.getFirmwareType());
         existingPrinter.setApiKey(dto.getApiKey());
+        existingPrinter.setCurrentMaterial(dto.getCurrentMaterial());
+        existingPrinter.setNozzleSize(dto.getNozzleSize());
 
         // 4. 更新到数据库 (MyBatis-Plus 会自动更新 updatedAt 时间)
         this.updateById(existingPrinter);
+
+        // 5. 刷新打印机列表缓存
+        printerCacheService.refreshPrinterCache();
     }
 
     @Override
@@ -116,53 +132,51 @@ public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmP
 
         // 安全通过，执行物理删除 (如果你配置了逻辑删除 @TableLogic，这里会自动变成 Update 操作)
         this.removeById(id);
+
+        // 刷新打印机列表缓存
+        printerCacheService.refreshPrinterCache();
     }
 
     @Override
     public List<String> scanNewKlipperDevices(String subnet) {
-        // 1. 查询数据库，获取已经录入过的所有 IP（防止重复扫描和添加）
-        List<String> existingIps = this.list().stream()
+        // 优化 1：使用 Set 代替 List，提高 contains 查找速度 O(N) -> O(1)
+        Set<String> existingIps = this.list().stream()
                 .map(FarmPrinter::getIpAddress)
-                .collect(Collectors.toList());
+                .collect(Collectors.toSet());
 
-        // 2. 创建一个临时的高并发线程池 (专门干脏活累活)
         ExecutorService executor = Executors.newFixedThreadPool(50);
         List<CompletableFuture<String>> futures = new ArrayList<>();
 
-        // 3. 遍历 1 到 254 的 IP 后缀
-        for (int i = 1; i <= 254; i++) {
-            final String targetIp = subnet + "." + i;
+        try {
+            for (int i = 1; i <= 254; i++) {
+                final String targetIp = subnet + "." + i;
 
-            // 如果数据库里已经有了，直接跳过，不扫了
-            if (existingIps.contains(targetIp)) {
-                continue;
+                if (existingIps.contains(targetIp)) {
+                    continue;
+                }
+
+                CompletableFuture<String> future = CompletableFuture.supplyAsync(() -> {
+                    try (Socket socket = new Socket()) {
+                        // 200毫秒探测，雷厉风行
+                        socket.connect(new InetSocketAddress(targetIp, 7125), 200);
+                        return targetIp;
+                    } catch (Exception e) {
+                        return null;
+                    }
+                }, executor);
+
+                futures.add(future);
             }
 
-            // 派发异步扫描任务
-            CompletableFuture<String> future = CompletableFuture.supplyAsync(() -> {
-                try (Socket socket = new Socket()) {
-                    // 尝试连接该 IP 的 7125 端口 (Moonraker 默认端口)
-                    // 超时时间设为短短的 200 毫秒！通就是通，不通就是不通，绝不墨迹
-                    socket.connect(new InetSocketAddress(targetIp, 7125), 200);
-                    return targetIp; // 没抛异常说明端口是开的！发现野生 Klipper！
-                } catch (Exception e) {
-                    return null; // 不通，返回 null
-                }
-            }, executor);
+            return futures.stream()
+                    .map(CompletableFuture::join)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
 
-            futures.add(future);
+        } finally {
+            // 优化 2：放在 finally 里，确保不管发生什么，必定释放那 50 个线程
+            executor.shutdown();
         }
-
-        // 4. 等待所有 254 个探测任务执行完毕，并收集结果
-        List<String> newDevices = futures.stream()
-                .map(CompletableFuture::join) // 阻塞等待单个任务完成
-                .filter(Objects::nonNull)     // 剔除没扫到的 null 值
-                .collect(Collectors.toList());
-
-        // 5. 随手关门，释放线程池
-        executor.shutdown();
-
-        return newDevices; // 返回发现的新 IP 列表
     }
 
     @Override
@@ -180,11 +194,16 @@ public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmP
             printer.setIpAddress(ip);
             printer.setFirmwareType("Klipper");
             printer.setStatus("OFFLINE"); // 默认离线，等刚才写的心跳任务去激活它
+            printer.setCurrentMaterial("ABS");
+            printer.setNozzleSize(new BigDecimal("1.20"));
             newPrinters.add(printer);
             counter++;
         }
 
         // MyBatis-Plus 提供的批量插入，性能极高
         this.saveBatch(newPrinters);
+
+        // 刷新打印机列表缓存
+        printerCacheService.refreshPrinterCache();
     }
 }

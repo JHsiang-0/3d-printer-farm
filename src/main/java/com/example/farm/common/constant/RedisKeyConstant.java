@@ -62,6 +62,28 @@ public class RedisKeyConstant {
     public static final String SYSTEM_STATS = "farm:stats:";
 
     /**
+     * 打印机列表缓存（基础信息）
+     * farm:printer:list
+     * 过期时间：1小时
+     */
+    public static final String PRINTER_LIST = "farm:printer:list";
+
+    /**
+     * 在线打印机集合（Redis Set）
+     * farm:printer:online
+     * 存储在线打印机的 ID 集合
+     * 过期时间：根据心跳动态更新
+     */
+    public static final String PRINTER_ONLINE_SET = "farm:printer:online";
+
+    /**
+     * 忙碌打印机集合（Redis Set）
+     * farm:printer:busy
+     * 存储正在打印的打印机 ID 集合
+     */
+    public static final String PRINTER_BUSY_SET = "farm:printer:busy";
+
+    /**
      * 获取完整的 Redis Key
      */
     public static String getKey(String prefix, Object suffix) {

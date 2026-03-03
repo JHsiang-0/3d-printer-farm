@@ -7,6 +7,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 
 @Slf4j
@@ -16,39 +18,108 @@ public class FarmWebSocketServer {
 
     // 存放所有当前在线的前端大屏客户端
     private static final CopyOnWriteArraySet<Session> sessions = new CopyOnWriteArraySet<>();
+    
+    // 为每个 Session 创建一个独立的锁对象，用于解决并发写入冲突
+    private static final Map<Session, Object> sessionLocks = new ConcurrentHashMap<>();
+    
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
     @OnOpen
     public void onOpen(Session session) {
         sessions.add(session);
+        // 为每个新会话创建锁对象
+        sessionLocks.put(session, new Object());
         log.info("🖥️ 新的大屏接入！当前在线大屏数: {}", sessions.size());
     }
 
     @OnClose
     public void onClose(Session session) {
         sessions.remove(session);
+        sessionLocks.remove(session);
+        log.info("🖥️ 大屏断开连接。当前在线大屏数: {}", sessions.size());
     }
 
     @OnError
     public void onError(Session session, Throwable error) {
         log.error("WebSocket 发生错误", error);
+        sessions.remove(session);
+        sessionLocks.remove(session);
     }
 
     /**
      * 向所有在线的大屏广播打印机最新状态 (JSON 格式)
+     * 使用同步锁解决并发写入冲突问题
      */
     public static void broadcastPrinterStatus(Object data) {
         if (sessions.isEmpty()) return;
 
+        String jsonMessage;
         try {
-            String jsonMessage = objectMapper.writeValueAsString(data);
-            for (Session session : sessions) {
-                if (session.isOpen()) {
-                    session.getAsyncRemote().sendText(jsonMessage);
+            jsonMessage = objectMapper.writeValueAsString(data);
+        } catch (Exception e) {
+            log.error("消息序列化失败", e);
+            return;
+        }
+
+        for (Session session : sessions) {
+            if (session.isOpen()) {
+                // 获取该 session 的锁对象
+                Object lock = sessionLocks.get(session);
+                if (lock == null) {
+                    lock = new Object();
+                    sessionLocks.putIfAbsent(session, lock);
+                    lock = sessionLocks.get(session);
+                }
+                
+                // 同步发送，避免并发冲突
+                synchronized (lock) {
+                    try {
+                        session.getBasicRemote().sendText(jsonMessage);
+                    } catch (IOException e) {
+                        log.error("发送消息到客户端失败: {}", session.getId(), e);
+                        // 发送失败时关闭会话
+                        try {
+                            session.close();
+                        } catch (IOException closeEx) {
+                            log.error("关闭会话失败", closeEx);
+                        }
+                        sessions.remove(session);
+                        sessionLocks.remove(session);
+                    }
                 }
             }
-        } catch (Exception e) {
-            log.error("广播消息失败", e);
         }
+    }
+    
+    /**
+     * 向指定会话发送消息（单播）
+     * @param session 目标会话
+     * @param data 消息数据
+     */
+    public static void sendMessage(Session session, Object data) {
+        if (session == null || !session.isOpen()) return;
+        
+        Object lock = sessionLocks.get(session);
+        if (lock == null) {
+            lock = new Object();
+            sessionLocks.putIfAbsent(session, lock);
+            lock = sessionLocks.get(session);
+        }
+        
+        synchronized (lock) {
+            try {
+                String jsonMessage = objectMapper.writeValueAsString(data);
+                session.getBasicRemote().sendText(jsonMessage);
+            } catch (Exception e) {
+                log.error("发送消息失败", e);
+            }
+        }
+    }
+    
+    /**
+     * 获取当前在线连接数
+     */
+    public static int getOnlineCount() {
+        return sessions.size();
     }
 }

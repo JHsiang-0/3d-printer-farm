@@ -6,6 +6,7 @@ import com.example.farm.entity.dto.MoonrakerStatusDTO;
 import com.example.farm.service.FarmPrinterService;
 import com.example.farm.service.PrinterCacheService;
 import com.example.farm.common.utils.MoonrakerApiClient;
+import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -35,40 +36,61 @@ public class PrinterMonitorTask {
     // 并发线程池，用于并行查询多个打印机状态
     private final ExecutorService executorService = Executors.newFixedThreadPool(10);
 
+    // 核心改进 1：优雅停机，防止重启时产生脏数据
+    @PreDestroy
+    public void destroy() {
+        log.info("🛑 正在优雅关闭打印机监控线程池...");
+        executorService.shutdown();
+    }
+
     /**
      * 每5秒执行一次状态监控
+     * 优化：使用Redis缓存打印机列表，减少数据库查询压力
      */
     @Scheduled(fixedRate = 5000)
     public void checkPrinterStatus() {
-        List<FarmPrinter> printers = printerService.list();
+        // 优先从Redis获取打印机列表，缓存未命中再从数据库加载
+        List<FarmPrinter> printers = printerCacheService.getAllPrintersFromCache();
+        if (printers == null) {
+            // 缓存未命中时，从数据库加载并缓存
+            log.info("🔄 Redis缓存未命中，从数据库加载打印机列表...");
+            printers = printerService.list();
+            if (!printers.isEmpty()) {
+                printerCacheService.cacheAllPrinters(printers);
+                log.info("📦 打印机列表已加载到Redis缓存，共 {} 台", printers.size());
+            }
+            return;
+        }
+        
+        // 缓存存在但为空列表，说明数据库中确实没有打印机
         if (printers.isEmpty()) {
             return;
         }
+        
+        log.debug("✅ 从Redis缓存获取打印机列表，共 {} 台", printers.size());
 
-        // 并行查询所有打印机状态
+        // 核心改进 2：极致优化！全异步非阻塞执行
         List<CompletableFuture<PrinterStatusResult>> futures = printers.stream()
                 .map(printer -> CompletableFuture.supplyAsync(
-                        () -> fetchAndUpdateStatus(printer), executorService))
-                .collect(Collectors.toList());
+                                () -> fetchAndUpdateStatus(printer), executorService)
+                        .thenApply(result -> {
+                            // 异步线程拿到数据后，自己推给前端，主线程不阻塞等待
+                            if (result.status != null) {
+                                pushToFrontend(result.printerId, result.status);
+                            }
+                            return result;
+                        }))
+                .toList();
 
-        // 等待所有查询完成
-        List<PrinterStatusResult> results = futures.stream()
-                .map(CompletableFuture::join)
-                .collect(Collectors.toList());
-
-        // 批量推送到前端
-        for (PrinterStatusResult result : results) {
-            if (result.status != null) {
-                pushToFrontend(result.printerId, result.status);
-            }
-        }
-
-        // 统计信息（每30秒输出一次日志）
-        long onlineCount = results.stream().filter(r -> r.online).count();
-        long offlineCount = results.size() - onlineCount;
-        if (System.currentTimeMillis() % 30000 < 5000) {
-            log.info("📊 打印机状态扫描完成：在线 {} 台，离线 {} 台", onlineCount, offlineCount);
-        }
+        // 异步统计，仅供日志打印，绝不阻塞主 Scheduled 线程
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                .thenRun(() -> {
+                    if (System.currentTimeMillis() % 30000 < 5000) {
+                        long onlineCount = futures.stream().map(CompletableFuture::join).filter(r -> r.online).count();
+                        long offlineCount = futures.size() - onlineCount;
+                        log.info("📊 打印机状态扫描完成：在线 {} 台，离线 {} 台", onlineCount, offlineCount);
+                    }
+                });
     }
 
     /**
@@ -79,33 +101,43 @@ public class PrinterMonitorTask {
         String printerName = printer.getName();
 
         try {
-            // 1. 从打印机获取实时状态
             MoonrakerStatusDTO status = moonrakerApiClient.getPrinterStatus(printer.getIpAddress());
 
             if (status != null) {
-                // 2. 缓存状态到 Redis（无论数据库是否更新成功，都先缓存）
                 printerCacheService.cachePrinterStatus(printerId, status);
+                
+                // 记录状态历史
+                printerCacheService.recordStatusHistory(printerId, status);
+                
+                // 更新在线状态统计
+                printerCacheService.markPrinterOnline(printerId);
 
-                // 3. 检查状态是否变化，需要更新数据库
                 String newDbStatus = determineDbStatus(status.getState());
                 if (!newDbStatus.equals(printer.getStatus())) {
-                    // 使用分布式锁更新数据库，避免并发冲突
-                    printer.setStatus(newDbStatus);
-                    boolean updated = printerCacheService.updatePrinterStatusWithLock(printer);
+                    // 核心改进 3：局部更新！只构造带有 ID 和状态的新对象更新，避免覆盖别的字段
+                    FarmPrinter updateEntity = new FarmPrinter();
+                    updateEntity.setId(printerId);
+                    updateEntity.setStatus(newDbStatus);
+
+                    boolean updated = printerCacheService.updatePrinterStatusWithLock(updateEntity);
                     if (updated) {
-                        log.info("🔄 打印机 [{}] 状态变更: {} → {}", 
+                        log.info("🔄 打印机 [{}] 状态变更: {} → {}",
                                 printerName, printer.getStatus(), newDbStatus);
+                        printer.setStatus(newDbStatus); // 同步内存对象
+                        
+                        // 更新 Redis 统计状态
+                        if ("PRINTING".equals(newDbStatus)) {
+                            printerCacheService.markPrinterBusy(printerId);
+                        } else if ("IDLE".equals(newDbStatus)) {
+                            printerCacheService.markPrinterIdle(printerId);
+                        }
                     }
                 }
-
                 return new PrinterStatusResult(printerId, status, true);
-
             } else {
-                // 打印机离线
                 handleOfflinePrinter(printer);
                 return new PrinterStatusResult(printerId, null, false);
             }
-
         } catch (Exception e) {
             log.error("获取打印机 [{}] 状态失败: {}", printerName, e.getMessage());
             return new PrinterStatusResult(printerId, null, false);
@@ -116,45 +148,34 @@ public class PrinterMonitorTask {
      * 处理离线打印机
      */
     private void handleOfflinePrinter(FarmPrinter printer) {
+        Long printerId = printer.getId();
         if (!"OFFLINE".equals(printer.getStatus())) {
-            printer.setStatus("OFFLINE");
-            boolean updated = printerCacheService.updatePrinterStatusWithLock(printer);
+            FarmPrinter updateEntity = new FarmPrinter();
+            updateEntity.setId(printerId);
+            updateEntity.setStatus("OFFLINE");
+
+            boolean updated = printerCacheService.updatePrinterStatusWithLock(updateEntity);
             if (updated) {
                 log.warn("❌ 打印机 [{}] 离线", printer.getName());
+                printer.setStatus("OFFLINE"); // 同步内存对象
             }
         }
-        // 清除缓存
-        printerCacheService.clearStatusCache(printer.getId());
+        // 更新 Redis 统计状态
+        printerCacheService.markPrinterOffline(printerId);
+        printerCacheService.clearStatusCache(printerId);
     }
 
-    /**
-     * 根据 Moonraker 状态确定数据库状态
-     */
     private String determineDbStatus(String moonrakerState) {
-        if (moonrakerState == null) {
-            return "OFFLINE";
-        }
-        switch (moonrakerState.toLowerCase()) {
-            case "printing":
-                return "PRINTING";
-            case "paused":
-                return "PRINTING"; // 暂停也算在打印中
-            case "standby":
-                return "IDLE";
-            case "complete":
-                return "IDLE";
-            case "error":
-                return "ERROR";
-            case "offline":
-                return "OFFLINE";
-            default:
-                return "IDLE";
-        }
+        if (moonrakerState == null) return "OFFLINE";
+        return switch (moonrakerState.toLowerCase()) {
+            case "printing", "paused" -> "PRINTING";
+            case "standby", "complete" -> "IDLE";
+            case "error" -> "ERROR";
+            case "offline" -> "OFFLINE";
+            default -> "IDLE";
+        };
     }
 
-    /**
-     * 推送状态到前端
-     */
     private void pushToFrontend(Long printerId, MoonrakerStatusDTO status) {
         Map<String, Object> payload = new HashMap<>();
         payload.put("printerId", printerId);
@@ -164,18 +185,6 @@ public class PrinterMonitorTask {
         FarmWebSocketServer.broadcastPrinterStatus(payload);
     }
 
-    /**
-     * 状态查询结果内部类
-     */
-    private static class PrinterStatusResult {
-        final Long printerId;
-        final MoonrakerStatusDTO status;
-        final boolean online;
-
-        PrinterStatusResult(Long printerId, MoonrakerStatusDTO status, boolean online) {
-            this.printerId = printerId;
-            this.status = status;
-            this.online = online;
-        }
+    private record PrinterStatusResult(Long printerId, MoonrakerStatusDTO status, boolean online) {
     }
 }

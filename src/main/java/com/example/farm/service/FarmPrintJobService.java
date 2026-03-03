@@ -32,6 +32,14 @@ public interface FarmPrintJobService extends IService<FarmPrintJob> {
     Long createJob(FarmPrintJobCreateDTO req);
 
     /**
+     * 创建打印任务（新接口，带用户ID）
+     * @param req 创建任务请求
+     * @param userId 当前登录用户ID
+     * @return 任务ID
+     */
+    Long createJob(FarmPrintJobCreateDTO req, Long userId);
+
+    /**
      * 分配任务并开始打印
      */
     boolean assignAndStartPrint(Long jobId, Long printerId);

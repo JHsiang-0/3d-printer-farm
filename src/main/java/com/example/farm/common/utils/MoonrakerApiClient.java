@@ -18,26 +18,27 @@ import java.time.Duration;
 @Component
 public class MoonrakerApiClient {
 
-    // 只保留这一个核心客户端和解析器
     private final RestClient restClient;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public MoonrakerApiClient() {
-        // 核心修复点：强制指定使用 HTTP/1.1 协议，并设置 3 秒超时时间！
+        // 核心修复点 1：设置 3 秒连接超时
         HttpClient httpClient = HttpClient.newBuilder()
-                .version(HttpClient.Version.HTTP_1_1) // 降级为 HTTP/1.1
-                .connectTimeout(Duration.ofSeconds(3)) // 3秒连不上就算了
+                .version(HttpClient.Version.HTTP_1_1)
+                .connectTimeout(Duration.ofSeconds(3))
                 .build();
 
+        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(httpClient);
+        // 核心修复点 2：设置 3 秒读取超时 (防止设备连上后不回传数据导致线程假死)
+        factory.setReadTimeout(Duration.ofSeconds(3));
+
         this.restClient = RestClient.builder()
-                .requestFactory(new JdkClientHttpRequestFactory(httpClient))
+                .requestFactory(factory)
                 .build();
     }
 
-    /**
-     * 1. 获取打印机实时温度、进度和状态
-     * 对应 Moonraker API: /printer/objects/query
-     */
+    // ... 下面的所有业务方法 (getPrinterStatus, emergencyStop 等) 完全保持不变 ...
+
     public MoonrakerStatusDTO getPrinterStatus(String ipAddress) {
         String url = String.format("http://%s:7125/printer/objects/query?extruder=temperature,target&heater_bed=temperature,target&display_status=progress&print_stats=state", ipAddress);
 
@@ -69,24 +70,17 @@ public class MoonrakerApiClient {
                 }
             }
         } catch (Exception e) {
-            // 核心修复点 2：把一大堆红色的异常堆栈变成一行优雅的警告
-            // 因为在物联网中，设备断网、超时太正常了，这属于业务常态，不需要打印完整堆栈
             log.warn("设备 [{}] 探测失败 (连接被拒绝或超时)", ipAddress);
         }
-        return null; // 返回 null，外面的巡逻员就会自动把它标为 OFFLINE
+        return null;
     }
 
-    /**
-     * 2. 发送紧急停止指令 (Emergency Stop)
-     * 对应 Moonraker API: /printer/emergency_stop
-     */
+    // ... emergencyStop, pausePrint, uploadAndPrint 保持你原有的写法 ...
     public boolean emergencyStop(String ipAddress) {
+        // 你的原有逻辑
         String url = String.format("http://%s:7125/printer/emergency_stop", ipAddress);
         try {
-            restClient.post()
-                    .uri(url)
-                    .retrieve()
-                    .toBodilessEntity(); // 我们只关心请求是否发送成功，不关心返回值
+            restClient.post().uri(url).retrieve().toBodilessEntity();
             log.info("🚨 已向打印机 [{}] 发送急停指令！", ipAddress);
             return true;
         } catch (Exception e) {
@@ -95,11 +89,8 @@ public class MoonrakerApiClient {
         }
     }
 
-    /**
-     * 3. 暂停当前打印任务
-     * 对应 Moonraker API: /printer/print/pause
-     */
     public boolean pausePrint(String ipAddress) {
+        // 你的原有逻辑
         String url = String.format("http://%s:7125/printer/print/pause", ipAddress);
         try {
             restClient.post().uri(url).retrieve().toBodilessEntity();
@@ -108,22 +99,17 @@ public class MoonrakerApiClient {
             return false;
         }
     }
-    /**
-     * 4. 终极指令：将现成的文件流发送给 Moonraker，上传完毕后立即开始打印！
-     */
-    public boolean uploadAndPrint(String ipAddress, org.springframework.core.io.Resource gcodeResource, String filename) {
-        String targetUrl = String.format("http://%s:7125/server/files/upload", ipAddress);
 
+    public boolean uploadAndPrint(String ipAddress, org.springframework.core.io.Resource gcodeResource, String filename) {
+        // 你的原有逻辑
+        String targetUrl = String.format("http://%s:7125/server/files/upload", ipAddress);
         try {
-            // 1. 构造发给打印机的 multipart/form-data 表单
             org.springframework.util.MultiValueMap<String, Object> body = new org.springframework.util.LinkedMultiValueMap<>();
-            body.add("file", gcodeResource); // 直接塞入流
+            body.add("file", gcodeResource);
             body.add("filename", filename != null ? filename : "farm_print.gcode");
-            body.add("print", "true"); // 告诉 Moonraker 上传完直接开打！
+            body.add("print", "true");
 
             log.info("🚀 正在向打印机 [{}] 投递切片文件并发送点火指令...", ipAddress);
-
-            // 2. 投递给打印机
             String response = restClient.post()
                     .uri(targetUrl)
                     .contentType(org.springframework.http.MediaType.MULTIPART_FORM_DATA)
