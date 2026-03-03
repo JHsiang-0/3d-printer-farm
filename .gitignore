@@ -8,6 +8,8 @@
 
 # Maven
 .mvn/wrapper/maven-wrapper.jar
+mvnw
+mvnw.cmd
 HELP.md
 
 # IDE - IntelliJ IDEA
