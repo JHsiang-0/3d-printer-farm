@@ -84,6 +84,13 @@ public class RedisKeyConstant {
     public static final String PRINTER_BUSY_SET = "farm:printer:busy";
 
     /**
+     * 打印机心跳记录（Sorted Set）
+     * farm:printer:heartbeat
+     * 成员：printerId，分数：心跳时间戳
+     */
+    public static final String PRINTER_HEARTBEAT_ZSET = "farm:printer:heartbeat";
+
+    /**
      * 获取完整的 Redis Key
      */
     public static String getKey(String prefix, Object suffix) {

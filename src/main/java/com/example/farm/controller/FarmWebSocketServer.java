@@ -29,14 +29,14 @@ public class FarmWebSocketServer {
         sessions.add(session);
         // 为每个新会话创建锁对象
         sessionLocks.put(session, new Object());
-        log.info("🖥️ 新的大屏接入！当前在线大屏数: {}", sessions.size());
+        log.info("WebSocket 客户端接入，当前在线连接数: {}", sessions.size());
     }
 
     @OnClose
     public void onClose(Session session) {
         sessions.remove(session);
         sessionLocks.remove(session);
-        log.info("🖥️ 大屏断开连接。当前在线大屏数: {}", sessions.size());
+        log.info("WebSocket 客户端断开，当前在线连接数: {}", sessions.size());
     }
 
     @OnError
@@ -57,7 +57,7 @@ public class FarmWebSocketServer {
         try {
             jsonMessage = objectMapper.writeValueAsString(data);
         } catch (Exception e) {
-            log.error("消息序列化失败", e);
+            log.error("WebSocket 消息序列化失败", e);
             return;
         }
 
@@ -76,12 +76,12 @@ public class FarmWebSocketServer {
                     try {
                         session.getBasicRemote().sendText(jsonMessage);
                     } catch (IOException e) {
-                        log.error("发送消息到客户端失败: {}", session.getId(), e);
+                        log.error("向客户端发送消息失败: sessionId={}", session.getId(), e);
                         // 发送失败时关闭会话
                         try {
                             session.close();
                         } catch (IOException closeEx) {
-                            log.error("关闭会话失败", closeEx);
+                            log.error("关闭异常会话失败: sessionId={}", session.getId(), closeEx);
                         }
                         sessions.remove(session);
                         sessionLocks.remove(session);
@@ -111,7 +111,7 @@ public class FarmWebSocketServer {
                 String jsonMessage = objectMapper.writeValueAsString(data);
                 session.getBasicRemote().sendText(jsonMessage);
             } catch (Exception e) {
-                log.error("发送消息失败", e);
+                log.error("单播消息发送失败", e);
             }
         }
     }

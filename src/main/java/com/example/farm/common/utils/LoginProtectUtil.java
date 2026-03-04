@@ -36,7 +36,7 @@ public class LoginProtectUtil {
         int failCount = count != null ? count.intValue() : 1;
         
         if (failCount >= MAX_FAIL_COUNT) {
-            log.warn("🚫 用户 [{}] 登录失败次数过多，账号已锁定 {} 分钟", username, LOCK_TIME_MINUTES);
+            log.warn("用户登录失败次数过多，账号已锁定: username={}, 锁定时长={}分钟", username, LOCK_TIME_MINUTES);
         }
         
         return failCount;

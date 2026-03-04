@@ -2,6 +2,11 @@ package com.example.farm.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.example.farm.common.exception.BusinessException;
+import com.example.farm.common.utils.LogUtil;
+import com.example.farm.common.utils.MoonrakerApiClient;
+import com.example.farm.common.utils.RustFsClient;
+import com.example.farm.common.utils.SecurityContextUtil;
 import com.example.farm.entity.FarmPrintFile;
 import com.example.farm.entity.FarmPrintJob;
 import com.example.farm.entity.FarmPrinter;
@@ -10,9 +15,6 @@ import com.example.farm.mapper.FarmPrintFileMapper;
 import com.example.farm.mapper.FarmPrintJobMapper;
 import com.example.farm.service.FarmPrintJobService;
 import com.example.farm.service.FarmPrinterService;
-import com.example.farm.common.exception.BusinessException;
-import com.example.farm.common.utils.MoonrakerApiClient;
-import com.example.farm.common.utils.RustFsClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -39,7 +41,7 @@ public class FarmPrintJobServiceImpl extends ServiceImpl<FarmPrintJobMapper, Far
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public Long submitJob(Long fileId, Long userId, Integer priority) {
         FarmPrintJob job = new FarmPrintJob();
         job.setFileId(fileId);
@@ -48,40 +50,38 @@ public class FarmPrintJobServiceImpl extends ServiceImpl<FarmPrintJobMapper, Far
         job.setStatus("QUEUED");
         job.setProgress(BigDecimal.ZERO);
         this.save(job);
+        log.info("提交打印任务成功: jobId={}, userId={}, fileId={}, priority={}", job.getId(), userId, fileId, job.getPriority());
         return job.getId();
     }
 
     @Override
     public List<FarmPrintJob> getQueuedJobs() {
         return this.list(new LambdaQueryWrapper<FarmPrintJob>()
-                .eq(FarmPrintJob::getStatus, "QUEUED")
+                .in(FarmPrintJob::getStatus, "QUEUED", "MANUAL")
                 .orderByDesc(FarmPrintJob::getPriority)
                 .orderByAsc(FarmPrintJob::getCreatedAt));
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public Long createJob(FarmPrintJobCreateDTO req) {
-        // 兼容旧接口，获取当前登录用户
-        Long currentUserId = com.example.farm.common.utils.SecurityContextUtil.getCurrentUserId();
+        Long currentUserId = SecurityContextUtil.getCurrentUserId();
         return createJob(req, currentUserId);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long createJob(FarmPrintJobCreateDTO req, Long userId) {
-        // 1. 参数校验
         if (userId == null) {
             throw new BusinessException("用户未登录，无法创建任务");
         }
-        
-        // 2. 校验文件是否存在
+
         FarmPrintFile fileRecord = farmPrintFileMapper.selectById(req.getFileId());
         if (fileRecord == null) {
-            throw new BusinessException("所选的切片文件不存在！");
+            log.warn("创建打印任务失败：切片文件不存在，fileId={}, userId={}", req.getFileId(), userId);
+            throw new BusinessException("所选的切片文件不存在");
         }
 
-        // 3. 构建打印任务
         FarmPrintJob job = new FarmPrintJob();
         job.setUserId(userId);
         job.setFileId(req.getFileId());
@@ -89,82 +89,81 @@ public class FarmPrintJobServiceImpl extends ServiceImpl<FarmPrintJobMapper, Far
         job.setEstTime(fileRecord.getEstTime());
         job.setMaterialType(req.getMaterialType() != null ? req.getMaterialType() : fileRecord.getMaterialType());
         job.setNozzleSize(req.getNozzleSize() != null ? req.getNozzleSize() : fileRecord.getNozzleSize());
-        job.setStatus("QUEUED");
         job.setPriority(req.getPriority() != null ? req.getPriority() : 0);
         job.setProgress(BigDecimal.ZERO);
+        job.setCreatedAt(LocalDateTime.now());
 
-        // 4. 保存任务
+        // 将“自动调度”和“人工确认后调度”拆成两个状态，便于前端和调度器精确协同。
+        job.setStatus(Boolean.TRUE.equals(req.getAutoAssign()) ? "QUEUED" : "MANUAL");
+
         this.save(job);
-
-        log.info("📝 生产订单已下达！任务ID: {}, 用户ID: {}, 要求耗材: {}, 喷嘴: {}mm",
-                job.getId(), userId, job.getMaterialType(), job.getNozzleSize());
-
+        LogUtil.dataChange("创建打印任务", "FarmPrintJob", job.getId(),
+                String.format("用户=%d，调度方式=%s，材料=%s，喷嘴=%s",
+                        userId, job.getStatus(), job.getMaterialType(), job.getNozzleSize()));
         return job.getId();
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public boolean assignAndStartPrint(Long jobId, Long printerId) {
         FarmPrintJob job = this.getById(jobId);
         FarmPrinter printer = farmPrinterService.getById(printerId);
 
         if (job == null || printer == null) {
-            log.warn("⚠️ 派单中止：找不到对应的任务(ID:{})或打印机(ID:{})", jobId, printerId);
-            return false;
+            log.warn("派发打印任务失败：任务或打印机不存在，jobId={}, printerId={}", jobId, printerId);
+            throw new BusinessException("找不到对应的任务或打印机");
         }
         if (!"IDLE".equals(printer.getStatus())) {
-            log.warn("⚠️ 派单中止：打印机 [{}] 正在忙碌 (当前状态:{})", printer.getName(), printer.getStatus());
-            return false;
+            log.warn("派发打印任务失败：打印机非空闲状态，jobId={}, printerId={}, status={}", jobId, printerId, printer.getStatus());
+            throw new BusinessException("该打印机正在忙碌，无法派单");
         }
-        if (!"QUEUED".equals(job.getStatus())) {
-            log.warn("⚠️ 派单中止：任务 [#{}] 不在排队状态 (当前状态:{})", job.getId(), job.getStatus());
-            return false;
-        }
-
-        // 防呆校验
-        if (job.getNozzleSize() != null && printer.getNozzleSize() != null) {
-            if (!job.getNozzleSize().equals(printer.getNozzleSize())) {
-                log.warn("💥 严重工艺冲突！任务要求喷嘴 {}mm，但机器 [{}] 安装的是 {}mm！",
-                        job.getNozzleSize(), printer.getName(), printer.getNozzleSize());
-                throw new RuntimeException("喷嘴尺寸不匹配，派单失败！");
-            }
+        if (!"QUEUED".equals(job.getStatus()) && !"MANUAL".equals(job.getStatus())) {
+            log.warn("派发打印任务失败：任务状态不支持派发，jobId={}, status={}", jobId, job.getStatus());
+            throw new BusinessException("任务状态不支持派发");
         }
 
-        if (job.getMaterialType() != null && printer.getCurrentMaterial() != null) {
-            if (!job.getMaterialType().equalsIgnoreCase(printer.getCurrentMaterial())) {
-                log.warn("💥 耗材冲突！任务要求 {}，机器 [{}] 当前装载的是 {}！",
-                        job.getMaterialType(), printer.getName(), printer.getCurrentMaterial());
-                throw new RuntimeException("装载耗材不匹配，派单失败！");
-            }
+        // 在下发前做材料与喷嘴校验，避免设备执行后才发现工艺不匹配导致中途失败。
+        if (job.getNozzleSize() != null && printer.getNozzleSize() != null
+                && job.getNozzleSize().compareTo(printer.getNozzleSize()) != 0) {
+            throw new BusinessException("喷嘴尺寸不匹配(" + job.getNozzleSize() + " vs " + printer.getNozzleSize() + ")");
+        }
+        if (job.getMaterialType() != null && printer.getCurrentMaterial() != null
+                && !job.getMaterialType().equalsIgnoreCase(printer.getCurrentMaterial())) {
+            throw new BusinessException("装载耗材不匹配(" + job.getMaterialType() + " vs " + printer.getCurrentMaterial() + ")");
         }
 
         FarmPrintFile fileRecord = farmPrintFileMapper.selectById(job.getFileId());
-        String filename = fileRecord != null ? fileRecord.getOriginalName() : "farm_print.gcode";
-        String safeName = fileRecord != null ? fileRecord.getSafeName() : 
-                job.getFileUrl().substring(job.getFileUrl().lastIndexOf("/") + 1);
+        if (fileRecord == null) {
+            throw new BusinessException("切片文件数据缺失");
+        }
 
-        log.info("👨‍💼 把任务 [{}] 指派给机器 [{}]", filename, printer.getName());
+        String filename = fileRecord.getOriginalName();
+        String safeName = fileRecord.getSafeName() != null
+                ? fileRecord.getSafeName()
+                : job.getFileUrl().substring(job.getFileUrl().lastIndexOf("/") + 1);
+
+        LogUtil.bizInfo("任务派发", "任务ID", jobId, "打印机ID", printerId, "文件名", filename);
 
         org.springframework.core.io.Resource fileStream = rustFsClient.getFileStream(safeName);
-        boolean isSuccess = moonrakerApiClient.uploadAndPrint(
-                printer.getIpAddress(),
-                fileStream,
-                filename
-        );
-
-        if (isSuccess) {
-            job.setPrinterId(printerId);
-            job.setStatus("PRINTING");
-            job.setStartedAt(LocalDateTime.now());
-            this.updateById(job);
-
-            printer.setStatus("PRINTING");
-            farmPrinterService.updateById(printer);
-
-            log.info("🎉 手动派单成功！机器开始打印！");
-            return true;
-        } else {
-            throw new RuntimeException("物理机接收文件失败，请检查机器网络");
+        if (fileStream == null) {
+            throw new BusinessException("无法从对象存储中读取切片文件");
         }
+
+        boolean isSuccess = moonrakerApiClient.uploadAndPrint(printer.getIpAddress(), fileStream, filename);
+        if (!isSuccess) {
+            log.warn("派发打印任务失败：下发到打印机失败，jobId={}, printerId={}", jobId, printerId);
+            throw new BusinessException("物理机接收文件超时或失败，请检查打印机网络连接");
+        }
+
+        job.setPrinterId(printerId);
+        job.setStatus("PRINTING");
+        job.setStartedAt(LocalDateTime.now());
+        this.updateById(job);
+
+        printer.setStatus("PRINTING");
+        farmPrinterService.updateById(printer);
+
+        LogUtil.dataChange("启动打印任务", "FarmPrintJob", job.getId(), "已分配到打印机: " + printer.getName());
+        return true;
     }
 }

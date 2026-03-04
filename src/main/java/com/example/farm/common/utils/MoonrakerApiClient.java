@@ -70,7 +70,7 @@ public class MoonrakerApiClient {
                 }
             }
         } catch (Exception e) {
-            log.warn("设备 [{}] 探测失败 (连接被拒绝或超时)", ipAddress);
+            log.debug("打印机状态探测失败: 设备IP={}，可能是连接拒绝或超时", ipAddress);
         }
         return null;
     }
@@ -81,10 +81,10 @@ public class MoonrakerApiClient {
         String url = String.format("http://%s:7125/printer/emergency_stop", ipAddress);
         try {
             restClient.post().uri(url).retrieve().toBodilessEntity();
-            log.info("🚨 已向打印机 [{}] 发送急停指令！", ipAddress);
+            log.info("已发送急停指令: 打印机IP={}", ipAddress);
             return true;
         } catch (Exception e) {
-            log.error("急停指令发送失败 [{}]: {}", ipAddress, e.getMessage());
+            log.error("发送急停指令失败: 打印机IP={}，原因={}", ipAddress, e.getMessage());
             return false;
         }
     }
@@ -96,6 +96,7 @@ public class MoonrakerApiClient {
             restClient.post().uri(url).retrieve().toBodilessEntity();
             return true;
         } catch (Exception e) {
+            log.warn("发送暂停指令失败: 打印机IP={}，原因={}", ipAddress, e.getMessage());
             return false;
         }
     }
@@ -109,7 +110,7 @@ public class MoonrakerApiClient {
             body.add("filename", filename != null ? filename : "farm_print.gcode");
             body.add("print", "true");
 
-            log.info("🚀 正在向打印机 [{}] 投递切片文件并发送点火指令...", ipAddress);
+            log.info("开始下发打印任务: 打印机IP={}，文件名={}", ipAddress, filename);
             String response = restClient.post()
                     .uri(targetUrl)
                     .contentType(org.springframework.http.MediaType.MULTIPART_FORM_DATA)
@@ -117,10 +118,10 @@ public class MoonrakerApiClient {
                     .retrieve()
                     .body(String.class);
 
-            log.info("✅ 打印机 [{}] 接收成功！响应: {}", ipAddress, response);
+            log.info("打印任务下发成功: 打印机IP={}，响应={}", ipAddress, response);
             return true;
         } catch (Exception e) {
-            log.error("❌ 给打印机 [{}] 下发任务失败: {}", ipAddress, e.getMessage());
+            log.error("打印任务下发失败: 打印机IP={}，原因={}", ipAddress, e.getMessage());
             return false;
         }
     }

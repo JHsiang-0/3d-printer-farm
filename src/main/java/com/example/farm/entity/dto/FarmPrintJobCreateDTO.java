@@ -23,4 +23,7 @@ public class FarmPrintJobCreateDTO {
 
     @Schema(description = "任务优先级 (数字越大越优先，默认 0)")
     private Integer priority;
+
+    @Schema(description = "是否自动分配打印机 (true: 自动, false: 手动)")
+    private Boolean autoAssign;
 }

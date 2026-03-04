@@ -1,6 +1,9 @@
 spring:
   application:
     name: Farm
+  output:
+    ansi:
+      enabled: ALWAYS
   servlet:
     multipart:
       max-file-size: 200MB      # 单个文件最大限制 (给 G-code 放宽到 200MB)
@@ -27,8 +30,8 @@ mybatis-plus:
   configuration:
     # 开启驼峰命名自动映射 (例如 db 中的 created_at 会自动映射到 Java 的 createdAt)
     map-underscore-to-camel-case: true
-    # 打印 SQL 日志，方便开发时调试
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    # 走 slf4j 统一收敛，不使用 stdout 直出
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
   mapper-locations: classpath*:/mapper/**/*.xml
   type-aliases-package: com.example.farm.entity
 rustfs:
@@ -46,3 +49,17 @@ admin:
   # 管理员操作密钥（用于密码批量迁移等敏感操作）
   # 生产环境请通过环境变量注入复杂随机字符串
   secret-key: ${ADMIN_SECRET_KEY:FarmAdmin2024}
+
+# 日志配置
+logging:
+  config: classpath:logback-spring.xml
+  file:
+    path: ./logs
+  level:
+    root: INFO
+    com.example.farm: INFO
+    com.example.farm.task: INFO
+    com.example.farm.controller.FarmWebSocketServer: WARN
+    org.springframework: WARN
+    org.springframework.web: WARN
+    org.apache.ibatis: WARN

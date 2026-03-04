@@ -10,7 +10,13 @@ import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
-import software.amazon.awssdk.services.s3.model.*;
+import software.amazon.awssdk.services.s3.model.CreateBucketRequest;
+import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
+import software.amazon.awssdk.services.s3.model.HeadBucketRequest;
+import software.amazon.awssdk.services.s3.model.NoSuchBucketException;
+import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
 import java.io.InputStream;
 import java.net.URI;
@@ -35,22 +41,24 @@ public class RustFsClient {
 
     @PostConstruct
     public void init() {
-        log.info("🔍 正在初始化 RustFS (S3) 客户端, 地址: {}", endpoint);
+        log.info("正在初始化 RustFS(S3) 客户端: endpoint={}", endpoint);
         try {
             this.s3Client = S3Client.builder()
                     .endpointOverride(URI.create(endpoint))
-                    .region(Region.US_EAST_1) // RustFS 不校验 region，写死即可
+                    // RustFS 不校验 region，写固定值即可。
+                    .region(Region.US_EAST_1)
                     .credentialsProvider(StaticCredentialsProvider.create(
                             AwsBasicCredentials.create(accessKey, secretKey)
                     ))
-                    .forcePathStyle(true) // 核心！适配 RustFS 的路径风格
+                    // 适配 RustFS 的 Path-Style 地址。
+                    .forcePathStyle(true)
                     .build();
 
-            // 启动时自动检查并创建 Bucket
+            // 启动时自动检查并创建 Bucket。
             createBucketIfNotExists();
-            log.info("✅ RustFS 客户端初始化成功！");
+            log.info("RustFS(S3) 客户端初始化成功");
         } catch (Exception e) {
-            log.error("❌ RustFS 初始化失败，请检查配置或网络！", e);
+            log.error("RustFS(S3) 客户端初始化失败，请检查配置或网络", e);
         }
     }
 
@@ -58,57 +66,60 @@ public class RustFsClient {
         try {
             s3Client.headBucket(HeadBucketRequest.builder().bucket(bucket).build());
         } catch (NoSuchBucketException e) {
-            log.info("📦 Bucket [{}] 不存在，正在自动创建...", bucket);
+            log.info("对象存储桶不存在，开始自动创建: bucket={}", bucket);
             s3Client.createBucket(CreateBucketRequest.builder().bucket(bucket).build());
         }
     }
 
     /**
-     * 流式上传文件到 RustFS
-     * @return 文件的最终下载 URL
+     * 流式上传文件到 RustFS。
+     *
+     * @return 文件最终可访问 URL
      */
     public String uploadFile(String filename, MultipartFile file) {
         try (InputStream inputStream = file.getInputStream()) {
             PutObjectRequest putObjectRequest = PutObjectRequest.builder()
                     .bucket(bucket)
                     .key(filename)
-                    .contentType("text/plain") // G-code 本质上是纯文本
+                    // G-code 本质为纯文本。
+                    .contentType("text/plain")
                     .build();
 
-            // 直接通过流式传输，零临时文件，超低内存消耗
+            // 通过流式方式上传，避免临时文件和高内存占用。
             s3Client.putObject(putObjectRequest, RequestBody.fromInputStream(inputStream, file.getSize()));
 
-            // 拼装用于 Klipper 下载的 Path-Style URL
+            // 组装 Path-Style URL，供 Klipper 下载。
             String fileUrl = String.format("%s/%s/%s", endpoint, bucket, filename);
-            log.info("⬆️ 文件已成功上传至: {}", fileUrl);
+            log.info("文件上传成功: {}", fileUrl);
             return fileUrl;
 
         } catch (Exception e) {
-            log.error("❌ 上传 G-code 到 RustFS 失败: {}", filename, e);
-            throw new RuntimeException("云存储服务异常");
+            log.error("上传切片文件到对象存储失败: 文件名={}", filename, e);
+            throw new RuntimeException("对象存储服务异常");
         }
     }
 
     /**
-     * 极速读取文件头 (利用 S3 的 Range 特性，只下前 8KB)
+     * 读取文件头部片段（8KB），用于快速元数据探测。
      */
     public String readHeader(String filename) {
         try {
             GetObjectRequest getObjectRequest = GetObjectRequest.builder()
                     .bucket(bucket)
                     .key(filename)
-                    .range("bytes=0-8191") // S3 协议原生支持 Range 获取
+                    .range("bytes=0-8191")
                     .build();
 
             byte[] bytes = s3Client.getObjectAsBytes(getObjectRequest).asByteArray();
             return new String(bytes);
         } catch (Exception e) {
-            log.warn("⚠️ 无法抓取文件头 [{}]: {}", filename, e.getMessage());
+            log.warn("读取文件头失败: 文件名={}，原因={}", filename, e.getMessage());
             return "";
         }
     }
+
     /**
-     * 带着 S3 密钥从 RustFS 获取文件流
+     * 从 RustFS 获取文件流。
      */
     public org.springframework.core.io.InputStreamResource getFileStream(String filename) {
         try {
@@ -119,20 +130,38 @@ public class RustFsClient {
 
             software.amazon.awssdk.core.ResponseInputStream<GetObjectResponse> s3Stream = s3Client.getObject(getObjectRequest);
 
-            // 包装成 Spring 认识的资源流，供后续表单上传
+            // 包装成 Spring 可识别的资源流，供后续转发上传等场景使用。
             return new org.springframework.core.io.InputStreamResource(s3Stream) {
                 @Override
                 public String getFilename() {
-                    return filename; // 必须重写，否则 Spring 找不到文件名
+                    return filename;
                 }
+
                 @Override
                 public long contentLength() {
                     return s3Stream.response().contentLength();
                 }
             };
         } catch (Exception e) {
-            log.error("❌ 从 RustFS 拉取文件流失败: {}", filename, e);
-            throw new RuntimeException("读取云存储文件失败");
+            log.error("读取对象存储文件流失败: 文件名={}", filename, e);
+            throw new RuntimeException("读取对象存储文件失败");
+        }
+    }
+
+    /**
+     * 按对象 Key 删除 RustFS 文件。
+     */
+    public void deleteFile(String filename) {
+        try {
+            DeleteObjectRequest request = DeleteObjectRequest.builder()
+                    .bucket(bucket)
+                    .key(filename)
+                    .build();
+            s3Client.deleteObject(request);
+            log.info("RustFS 对象删除成功: bucket={}, key={}", bucket, filename);
+        } catch (Exception e) {
+            log.error("RustFS 对象删除失败: bucket={}, key={}", bucket, filename, e);
+            throw new RuntimeException("对象存储删除失败");
         }
     }
 }

@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.example.farm.common.exception.BusinessException;
 import com.example.farm.common.utils.GCodeParser;
 import com.example.farm.common.utils.RustFsClient;
+import com.example.farm.common.utils.SecurityContextUtil;
 import com.example.farm.entity.FarmPrintFile;
 import com.example.farm.entity.dto.FarmPrintFileQueryDTO;
 import com.example.farm.mapper.FarmPrintFileMapper;
@@ -14,138 +15,232 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 
-/**
- * <p>
- * 打印文件表 服务实现类
- * </p>
- *
- * @author codexiang
- * @since 2026-03-01
- */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class FarmPrintFileServiceImpl extends ServiceImpl<FarmPrintFileMapper, FarmPrintFile> implements FarmPrintFileService {
 
+    private static final int META_SAMPLE_SIZE = 8192;
+    private static final int DEEP_TAIL_SAMPLE_SIZE = 512 * 1024; // 512KB
+    private static final long FULL_PARSE_MAX_BYTES = 100L * 1024 * 1024; // 100MB
+
     private final RustFsClient rustFsClient;
-    private final FarmPrintFileMapper farmPrintFileMapper;
-
-    @Override
-    public FarmPrintFileMapper getBaseMapper() {
-        return farmPrintFileMapper;
-    }
-
-    @Override
-    @Transactional(rollbackFor = Exception.class)
-    public FarmPrintFile uploadFile(MultipartFile file, Long userId) {
-        // 1. 参数校验
-        if (file == null || file.isEmpty()) {
-            throw new BusinessException("上传文件不能为空");
-        }
-
-        String originalName = file.getOriginalFilename();
-        if (!StringUtils.hasText(originalName)) {
-            throw new BusinessException("文件名不能为空");
-        }
-
-        // 2. 生成安全文件名
-        String safeName = System.currentTimeMillis() + "_" + originalName;
-
-        // 3. 上传到 RustFS
-        String fileUrl;
-        try {
-            fileUrl = rustFsClient.uploadFile(safeName, file);
-        } catch (Exception e) {
-            log.error("文件上传到RustFS失败: {}", originalName, e);
-            throw new BusinessException("文件上传失败，请稍后重试");
-        }
-
-        // 4. 极速读取文件头并解析GCode元数据
-        GCodeParser.GCodeMeta meta;
-        try {
-            String headerContent = rustFsClient.readHeader(safeName);
-            meta = GCodeParser.parseMetadata(headerContent);
-        } catch (Exception e) {
-            log.warn("GCode文件解析失败: {}", originalName, e);
-            // 解析失败不影响文件上传，使用默认值
-            meta = new GCodeParser.GCodeMeta();
-        }
-
-        // 5. 构建文件实体
-        FarmPrintFile farmPrintFile = new FarmPrintFile();
-        farmPrintFile.setOriginalName(originalName);
-        farmPrintFile.setSafeName(safeName);
-        farmPrintFile.setFileUrl(fileUrl);
-        farmPrintFile.setFileSize(file.getSize());
-        farmPrintFile.setUserId(userId);
-        farmPrintFile.setCreatedAt(LocalDateTime.now());
-
-        // 保存解析出的元数据
-        farmPrintFile.setEstTime(meta.getEstTime());
-        farmPrintFile.setMaterialType(meta.getMaterialType());
-        farmPrintFile.setNozzleSize(meta.getNozzleSize());
-
-        // 6. 保存到数据库
-        farmPrintFileMapper.insert(farmPrintFile);
-
-        log.info("文件上传成功: id={}, name={}, userId={}", farmPrintFile.getId(), originalName, userId);
-
-        return farmPrintFile;
-    }
 
     @Override
     public Page<FarmPrintFile> pageFiles(FarmPrintFileQueryDTO queryDTO) {
-        // 1. 构造分页对象
         Page<FarmPrintFile> page = new Page<>(queryDTO.getPageNum(), queryDTO.getPageSize());
-
-        // 2. 构造查询条件
         LambdaQueryWrapper<FarmPrintFile> wrapper = new LambdaQueryWrapper<>();
-
-        // 文件名模糊查询
-        wrapper.like(StringUtils.hasText(queryDTO.getFileName()), 
-                FarmPrintFile::getOriginalName, queryDTO.getFileName());
-
-        // 耗材类型精确匹配
-        wrapper.eq(StringUtils.hasText(queryDTO.getMaterialType()), 
-                FarmPrintFile::getMaterialType, queryDTO.getMaterialType());
-
-        // 用户ID精确匹配
-        wrapper.eq(queryDTO.getUserId() != null, 
-                FarmPrintFile::getUserId, queryDTO.getUserId());
-
-        // 按创建时间倒序排列
-        wrapper.orderByDesc(FarmPrintFile::getCreatedAt);
-
-        // 3. 执行分页查询并返回
+        wrapper.eq(FarmPrintFile::getUserId, SecurityContextUtil.getCurrentUserId())
+                .orderByDesc(FarmPrintFile::getCreatedAt);
         return this.page(page, wrapper);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void deleteFile(Long id, Long userId) {
-        // 1. 校验文件是否存在
-        FarmPrintFile file = farmPrintFileMapper.selectById(id);
-        if (file == null) {
-            throw new BusinessException("文件不存在或已被删除");
+    public FarmPrintFile uploadAndParseFile(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException("上传文件不能为空");
         }
 
-        // 2. 权限校验：只能删除自己上传的文件（管理员除外，此处简化处理）
-        if (!file.getUserId().equals(userId)) {
-            throw new BusinessException("无权删除他人上传的文件");
+        Long userId = SecurityContextUtil.getCurrentUserId();
+        String originalName = file.getOriginalFilename();
+        if (originalName == null || originalName.isBlank()) {
+            originalName = "unknown.gcode";
+        }
+        String safeName = System.currentTimeMillis() + "_" + originalName;
+
+        GCodeParser.GCodeMeta filenameMeta = GCodeParser.parseMetadataFromFilename(originalName);
+        boolean filenameHit = hasUsableMeta(filenameMeta);
+
+        String metaContent = extractHeadAndTail(file);
+        GCodeParser.GCodeMeta contentMeta = GCodeParser.parseMetadata(metaContent);
+        boolean headTailHit = hasUsableMeta(contentMeta);
+        boolean deepTailTriggered = false;
+        boolean deepTailHit = false;
+        if (!headTailHit) {
+            deepTailTriggered = true;
+            String deepTailContent = extractTail(file, DEEP_TAIL_SAMPLE_SIZE);
+            if (!deepTailContent.isEmpty()) {
+                contentMeta = GCodeParser.parseMetadata(deepTailContent);
+                deepTailHit = hasUsableMeta(contentMeta);
+            }
         }
 
-        // 3. 删除数据库记录
-        farmPrintFileMapper.deleteById(id);
+        boolean fullFallbackTriggered = false;
+        boolean fullFallbackHit = false;
+        boolean fullFallbackSkippedBySize = false;
+        if (!headTailHit && !deepTailHit) {
+            fullFallbackTriggered = true;
+            String fullContent = extractFullContentIfAffordable(file);
+            if (!fullContent.isEmpty()) {
+                contentMeta = GCodeParser.parseMetadata(fullContent);
+                fullFallbackHit = hasUsableMeta(contentMeta);
+            } else {
+                fullFallbackSkippedBySize = file.getSize() > FULL_PARSE_MAX_BYTES;
+            }
+        }
 
-        // 4. 异步删除RustFS上的文件（可选，根据业务需求）
-        // 注意：这里选择保留文件或异步删除，避免事务回滚时文件已删除的问题
-        // rustFsClient.deleteFile(file.getSafeName());
+        GCodeParser.GCodeMeta meta = new GCodeParser.GCodeMeta();
+        meta.setEstTime((filenameMeta.getEstTime() != null && filenameMeta.getEstTime() > 0)
+                ? filenameMeta.getEstTime()
+                : contentMeta.getEstTime());
+        meta.setMaterialType(isNotBlank(filenameMeta.getMaterialType())
+                ? filenameMeta.getMaterialType()
+                : contentMeta.getMaterialType());
+        meta.setNozzleSize(contentMeta.getNozzleSize());
+        meta.setLineWidth(contentMeta.getLineWidth());
 
-        log.info("文件删除成功: id={}, name={}, userId={}", id, file.getOriginalName(), userId);
+        String materialSource = isNotBlank(filenameMeta.getMaterialType())
+                ? "filename"
+                : (isNotBlank(contentMeta.getMaterialType())
+                ? (fullFallbackTriggered ? "full-file" : (deepTailTriggered ? "deep-tail" : "head-tail"))
+                : "default");
+        String estTimeSource = (filenameMeta.getEstTime() != null && filenameMeta.getEstTime() > 0)
+                ? "filename"
+                : ((contentMeta.getEstTime() != null && contentMeta.getEstTime() > 0)
+                ? (fullFallbackTriggered ? "full-file" : (deepTailTriggered ? "deep-tail" : "head-tail"))
+                : "default");
+
+        log.info("gcode meta parse path: userId={}, file={}, filenameHit={}, headTailHit={}, deepTailTriggered={}, deepTailHit={}, fullFallbackTriggered={}, fullFallbackHit={}, fullFallbackSkippedBySize={}, fileSize={}, materialSource={}, estTimeSource={}",
+                userId, originalName, filenameHit, headTailHit, deepTailTriggered, deepTailHit, fullFallbackTriggered, fullFallbackHit, fullFallbackSkippedBySize, file.getSize(), materialSource, estTimeSource);
+        log.info("切片元数据解析结果: userId={}, 文件={}, 预计耗时(s)={}, 喷嘴={}, 线宽={}, 材料={}",
+                userId, originalName, meta.getEstTime(), meta.getNozzleSize(), meta.getLineWidth(), meta.getMaterialType());
+
+        String fileUrl = rustFsClient.uploadFile(safeName, file);
+
+        FarmPrintFile printFile = new FarmPrintFile();
+        printFile.setOriginalName(originalName);
+        printFile.setSafeName(safeName);
+        printFile.setFileUrl(fileUrl);
+        printFile.setFileSize(file.getSize());
+        printFile.setUserId(userId);
+        printFile.setCreatedAt(LocalDateTime.now());
+
+        printFile.setEstTime(meta.getEstTime());
+        printFile.setMaterialType(meta.getMaterialType() != null ? meta.getMaterialType() : "PLA");
+        printFile.setNozzleSize(meta.getNozzleSize() != null ? meta.getNozzleSize() : new BigDecimal("0.40"));
+
+        this.save(printFile);
+        log.info("切片文件入库成功: fileId={}, userId={}, safeName={}", printFile.getId(), userId, safeName);
+        return printFile;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteFile(Long id) {
+        Long userId = SecurityContextUtil.getCurrentUserId();
+        LambdaQueryWrapper<FarmPrintFile> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(FarmPrintFile::getId, id)
+                .eq(FarmPrintFile::getUserId, userId);
+        FarmPrintFile target = this.getOne(wrapper, false);
+        if (target == null) {
+            log.warn("delete print file ignored: not found or no permission, fileId={}, userId={}", id, userId);
+            return;
+        }
+
+        String objectKey = target.getSafeName();
+        rustFsClient.deleteFile(objectKey);
+        this.removeById(target.getId());
+        log.info("print file deleted from rustfs and db: fileId={}, userId={}, key={}", id, userId, objectKey);
+    }
+
+    private String extractHeadAndTail(MultipartFile file) {
+        try {
+            long size = file.getSize();
+            if (size <= META_SAMPLE_SIZE * 2L) {
+                return new String(file.getBytes(), StandardCharsets.UTF_8);
+            }
+
+            byte[] head = readFirstBytes(file, META_SAMPLE_SIZE);
+            byte[] tail = readLastBytes(file, META_SAMPLE_SIZE);
+            return new String(head, StandardCharsets.UTF_8) + "\n...\n" + new String(tail, StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            log.error("读取切片文件头尾信息失败", e);
+            return "";
+        }
+    }
+
+    private String extractTail(MultipartFile file, int bytes) {
+        try {
+            byte[] tail = readLastBytes(file, bytes);
+            return new String(tail, StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            log.warn("failed to read full gcode content for metadata fallback", e);
+            return "";
+        }
+    }
+
+    private byte[] readFirstBytes(MultipartFile file, int maxBytes) throws IOException {
+        try (InputStream is = file.getInputStream(); ByteArrayOutputStream out = new ByteArrayOutputStream(maxBytes)) {
+            byte[] buffer = new byte[4096];
+            int remaining = maxBytes;
+            int n;
+            while (remaining > 0 && (n = is.read(buffer, 0, Math.min(buffer.length, remaining))) != -1) {
+                out.write(buffer, 0, n);
+                remaining -= n;
+            }
+            return out.toByteArray();
+        }
+    }
+
+    private byte[] readLastBytes(MultipartFile file, int maxBytes) throws IOException {
+        try (InputStream is = file.getInputStream()) {
+            byte[] ring = new byte[maxBytes];
+            byte[] buffer = new byte[8192];
+            long total = 0;
+            int n;
+            while ((n = is.read(buffer)) != -1) {
+                for (int i = 0; i < n; i++) {
+                    ring[(int) ((total + i) % maxBytes)] = buffer[i];
+                }
+                total += n;
+            }
+
+            if (total == 0) {
+                return new byte[0];
+            }
+
+            int actual = (int) Math.min(total, maxBytes);
+            int start = (int) ((total - actual) % maxBytes);
+            byte[] tail = new byte[actual];
+            for (int i = 0; i < actual; i++) {
+                tail[i] = ring[(start + i) % maxBytes];
+            }
+            return tail;
+        }
+    }
+
+    private boolean isNotBlank(String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+
+    private boolean hasUsableMeta(GCodeParser.GCodeMeta meta) {
+        if (meta == null) {
+            return false;
+        }
+        boolean hasMaterial = isNotBlank(meta.getMaterialType());
+        boolean hasTime = meta.getEstTime() != null && meta.getEstTime() > 0;
+        return hasMaterial || hasTime;
+    }
+
+    private String extractFullContentIfAffordable(MultipartFile file) {
+        try {
+            if (file.getSize() <= 0 || file.getSize() > FULL_PARSE_MAX_BYTES) {
+                return "";
+            }
+            return new String(file.getBytes(), StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            log.warn("failed to read full gcode content for metadata fallback", e);
+            return "";
+        }
     }
 }

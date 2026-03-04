@@ -34,7 +34,7 @@ public class JwtUtils {
     public void init() {
         STATIC_SECRET_KEY = secretKey;
         STATIC_EXPIRE_TIME = expireTime;
-        log.info("🔐 JWT 工具类初始化完成，Token 有效期: {} 毫秒", expireTime);
+        log.info("JWT 工具初始化完成，Token 有效期: {} 毫秒", expireTime);
     }
 
     /**

@@ -257,7 +257,7 @@
 ```
 
 ### 4.2 创建打印任务（从文件）
-- **URL**: `POST /api/v1/print-files/create-job`
+- **URL**: `POST /api/v1/print-jobs/create`
 - **请求体**:
 ```json
 {

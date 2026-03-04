@@ -12,6 +12,7 @@ import com.example.farm.mapper.FarmPrinterMapper;
 import com.example.farm.service.FarmPrinterService;
 import com.example.farm.service.PrinterCacheService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -28,81 +29,65 @@ import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmPrinter> implements FarmPrinterService {
 
     private final PrinterCacheService printerCacheService;
-    private final FarmPrinterMapper farmPrinterMapper;
 
     @Override
     public Page<FarmPrinter> pagePrinters(FarmPrinterQueryDTO queryDTO) {
-        // 1. 构造分页对象
         Page<FarmPrinter> page = new Page<>(queryDTO.getPageNum(), queryDTO.getPageSize());
-
-        // 2. 构造查询条件
         LambdaQueryWrapper<FarmPrinter> wrapper = new LambdaQueryWrapper<>();
 
-        // 如果前端传了名称，则进行 LIKE 模糊搜索
         wrapper.like(StringUtils.hasText(queryDTO.getName()), FarmPrinter::getName, queryDTO.getName());
-
-        // 如果前端传了状态，则进行精确匹配 (比如只看正在报错的机器)
         wrapper.eq(StringUtils.hasText(queryDTO.getStatus()), FarmPrinter::getStatus, queryDTO.getStatus());
-
-        // 按创建时间倒序排列，或者你可以改成按状态排序 (比如故障的排在最前面)
         wrapper.orderByDesc(FarmPrinter::getCreatedAt);
 
-        // 3. 执行分页查询并返回
         return this.page(page, wrapper);
     }
 
     @Override
     public void addPrinter(FarmPrinterAddDTO dto) {
-        // 1. 核心校验：检查局域网 IP 是否已被占用
         long count = this.count(new LambdaQueryWrapper<FarmPrinter>()
                 .eq(FarmPrinter::getIpAddress, dto.getIpAddress()));
         if (count > 0) {
-            // 抛出我们之前写好的业务异常，大管家会拦截并返回给前端 500
+            log.warn("新增打印机失败：IP 已存在，ip={}", dto.getIpAddress());
             throw new BusinessException("该 IP 地址的打印机已存在，请勿重复添加！");
         }
 
-        // 2. 将 DTO 转换为数据库实体 Entity
         FarmPrinter printer = new FarmPrinter();
         printer.setName(dto.getName());
         printer.setIpAddress(dto.getIpAddress());
         printer.setMacAddress(dto.getMacAddress());
         printer.setFirmwareType(dto.getFirmwareType());
         printer.setApiKey(dto.getApiKey());
-
-        // 3. 强行业务规则：新入库的机器，状态一律强制设为 "OFFLINE" (离线)
-        // 等待后续系统通过 Ping 或 WebSocket 心跳检测到它在线后，再改为 "IDLE" (空闲)
         printer.setStatus("OFFLINE");
 
-        // 4. 保存到数据库 (MyBatis-Plus 会自动帮我们填充 createdAt 时间)
         this.save(printer);
+        log.info("新增打印机成功：id={}, name={}, ip={}", printer.getId(), printer.getName(), printer.getIpAddress());
 
-        // 5. 刷新打印机列表缓存
         printerCacheService.refreshPrinterCache();
     }
 
     @Override
     public void updatePrinter(FarmPrinterUpdateDTO dto) {
-        // 1. 确保这台机器真的存在
         FarmPrinter existingPrinter = this.getById(dto.getId());
         if (existingPrinter == null) {
+            log.warn("更新打印机失败：打印机不存在，id={}", dto.getId());
             throw new BusinessException("该打印机不存在！");
         }
 
-        // 2. 如果修改了 IP 地址，必须检查新 IP 是否被【其他机器】占用了
         if (dto.getIpAddress() != null && !dto.getIpAddress().equals(existingPrinter.getIpAddress())) {
             long count = this.count(new LambdaQueryWrapper<FarmPrinter>()
                     .eq(FarmPrinter::getIpAddress, dto.getIpAddress())
-                    .ne(FarmPrinter::getId, dto.getId())); // 排除自己
+                    .ne(FarmPrinter::getId, dto.getId()));
             if (count > 0) {
+                log.warn("更新打印机失败：目标 IP 被占用，id={}, ip={}", dto.getId(), dto.getIpAddress());
                 throw new BusinessException("新的 IP 地址已被其他打印机占用！");
             }
         }
 
-        // 3. 将新的数据覆盖进去 (由于用了 MyBatis-Plus，只 set 需要修改的字段即可)
         existingPrinter.setName(dto.getName());
         existingPrinter.setIpAddress(dto.getIpAddress());
         existingPrinter.setMacAddress(dto.getMacAddress());
@@ -111,10 +96,9 @@ public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmP
         existingPrinter.setCurrentMaterial(dto.getCurrentMaterial());
         existingPrinter.setNozzleSize(dto.getNozzleSize());
 
-        // 4. 更新到数据库 (MyBatis-Plus 会自动更新 updatedAt 时间)
         this.updateById(existingPrinter);
+        log.info("更新打印机成功：id={}, name={}, ip={}", existingPrinter.getId(), existingPrinter.getName(), existingPrinter.getIpAddress());
 
-        // 5. 刷新打印机列表缓存
         printerCacheService.refreshPrinterCache();
     }
 
@@ -122,24 +106,26 @@ public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmP
     public void deletePrinter(Long id) {
         FarmPrinter printer = this.getById(id);
         if (printer == null) {
+            log.warn("删除打印机失败：打印机不存在，id={}", id);
             throw new BusinessException("打印机不存在或已被删除！");
         }
 
-        // 核心物联网安全拦截：正在打印的机器绝对不允许删除！
         if ("PRINTING".equals(printer.getStatus())) {
+            log.warn("删除打印机被阻止：打印机正在打印中，id={}, name={}", id, printer.getName());
             throw new BusinessException("危险操作：该机器正在打印中，无法删除！请先中止打印任务。");
         }
 
-        // 安全通过，执行物理删除 (如果你配置了逻辑删除 @TableLogic，这里会自动变成 Update 操作)
         this.removeById(id);
+        log.info("删除打印机成功：id={}, name={}", id, printer.getName());
 
-        // 刷新打印机列表缓存
         printerCacheService.refreshPrinterCache();
     }
 
     @Override
     public List<String> scanNewKlipperDevices(String subnet) {
-        // 优化 1：使用 Set 代替 List，提高 contains 查找速度 O(N) -> O(1)
+        log.info("开始扫描局域网 Klipper 设备：subnet={}", subnet);
+
+        // 先把已入库 IP 放到 Set，避免扫描结果重复入库并降低 contains 查询开销。
         Set<String> existingIps = this.list().stream()
                 .map(FarmPrinter::getIpAddress)
                 .collect(Collectors.toSet());
@@ -157,7 +143,7 @@ public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmP
 
                 CompletableFuture<String> future = CompletableFuture.supplyAsync(() -> {
                     try (Socket socket = new Socket()) {
-                        // 200毫秒探测，雷厉风行
+                        // 仅探测 Klipper 默认端口，快速过滤掉非目标主机，减少整体扫描时长。
                         socket.connect(new InetSocketAddress(targetIp, 7125), 200);
                         return targetIp;
                     } catch (Exception e) {
@@ -168,13 +154,14 @@ public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmP
                 futures.add(future);
             }
 
-            return futures.stream()
+            List<String> discovered = futures.stream()
                     .map(CompletableFuture::join)
                     .filter(Objects::nonNull)
                     .collect(Collectors.toList());
 
+            log.info("局域网扫描完成：发现新设备 {} 台，subnet={}", discovered.size(), subnet);
+            return discovered;
         } finally {
-            // 优化 2：放在 finally 里，确保不管发生什么，必定释放那 50 个线程
             executor.shutdown();
         }
     }
@@ -182,28 +169,25 @@ public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmP
     @Override
     public void batchAddPrinters(List<String> ipList) {
         if (ipList == null || ipList.isEmpty()) {
+            log.warn("批量新增打印机跳过：IP 列表为空");
             return;
         }
 
         List<FarmPrinter> newPrinters = new ArrayList<>();
-        int counter = 1;
         for (String ip : ipList) {
             FarmPrinter printer = new FarmPrinter();
-            // 自动生成一个默认名字，例如: Klipper-192.168.1.10
             printer.setName("Klipper-" + ip);
             printer.setIpAddress(ip);
             printer.setFirmwareType("Klipper");
-            printer.setStatus("OFFLINE"); // 默认离线，等刚才写的心跳任务去激活它
+            printer.setStatus("OFFLINE");
             printer.setCurrentMaterial("ABS");
             printer.setNozzleSize(new BigDecimal("1.20"));
             newPrinters.add(printer);
-            counter++;
         }
 
-        // MyBatis-Plus 提供的批量插入，性能极高
         this.saveBatch(newPrinters);
+        log.info("批量新增打印机成功：共 {} 台", newPrinters.size());
 
-        // 刷新打印机列表缓存
         printerCacheService.refreshPrinterCache();
     }
 }
