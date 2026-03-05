@@ -30,9 +30,12 @@ public class FarmPrinterUpdateDTO {
     @Schema(description = "上位机 API 通信密钥")
     private String apiKey;
 
-    @Schema(description = "喷嘴大小")
+    @Schema(description = "当前装载耗材 (如 PLA, PETG, ABS)")
     private String currentMaterial;
 
-    @Schema(description = "耗材直径")
+    @Schema(description = "当前安装的喷嘴直径 (如 0.40, 0.60)")
     private BigDecimal nozzleSize;
+
+    @Schema(description = "设备编号/机台号（用于产线管理）")
+    private String machineNumber;
 }

@@ -7,6 +7,7 @@ import com.example.farm.entity.FarmPrinter;
 import com.example.farm.entity.dto.FarmPrinterAddDTO;
 import com.example.farm.entity.dto.FarmPrinterQueryDTO;
 import com.example.farm.entity.dto.FarmPrinterUpdateDTO;
+import com.example.farm.entity.dto.PrinterPositionUpdateDTO;
 import com.example.farm.entity.dto.PrinterScanResultDTO;
 import com.example.farm.service.FarmPrinterService;
 import lombok.RequiredArgsConstructor;
@@ -221,5 +222,34 @@ public class FarmPrinterController {
             return Result.success(null, "未找到该 IP 地址的设备");
         }
         return Result.success(printer);
+    }
+
+    /**
+     * 【新增】批量更新打印机物理位置坐标（用于数字孪生看板拖拽）
+     * <p>接收前端在数字孪生看板上拖拽后产生的坐标变更，批量更新设备的 grid_row 和 grid_col。</p>
+     * <p>业务规则：</p>
+     * <ul>
+     *     <li>gridRow 范围：1-4</li>
+     *     <li>gridCol 范围：1-12</li>
+     *     <li>传入 null 表示将该设备移回待分配区</li>
+     * </ul>
+     *
+     * @param positionUpdates 位置更新列表（包含 id, gridRow, gridCol）
+     * @return 更新结果（成功更新的设备数量）
+     * @throws BusinessException 当参数为空时抛出
+     */
+    @PutMapping("/positions")
+    public Result<String> batchUpdatePositions(
+            @RequestBody List<PrinterPositionUpdateDTO> positionUpdates) {
+        if (positionUpdates == null || positionUpdates.isEmpty()) {
+            throw new BusinessException("位置更新列表不能为空");
+        }
+
+        int successCount = printerService.batchUpdatePositions(positionUpdates);
+
+        String message = String.format("成功更新 %d/%d 台设备的位置",
+                successCount, positionUpdates.size());
+
+        return Result.success(null, message);
     }
 }

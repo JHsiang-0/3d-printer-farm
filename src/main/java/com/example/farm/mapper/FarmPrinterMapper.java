@@ -80,4 +80,17 @@ public interface FarmPrinterMapper extends BaseMapper<FarmPrinter> {
      * @return 存在的数量
      */
     Long countByMacAddresses(@Param("macList") List<String> macList);
+
+    /**
+     * 【新增】更新打印机物理位置坐标
+     * <p>用于数字孪生看板拖拽后更新设备的 grid_row 和 grid_col</p>
+     *
+     * @param id 打印机 ID
+     * @param gridRow 行号（1-4），null 表示移回待分配区
+     * @param gridCol 列号（1-12），null 表示移回待分配区
+     * @return 影响的行数
+     */
+    int updatePrinterPosition(@Param("id") Long id,
+                              @Param("gridRow") Integer gridRow,
+                              @Param("gridCol") Integer gridCol);
 }

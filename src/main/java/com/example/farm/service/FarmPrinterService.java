@@ -7,6 +7,7 @@ import com.example.farm.entity.FarmPrinter;
 import com.example.farm.entity.dto.FarmPrinterAddDTO;
 import com.example.farm.entity.dto.FarmPrinterQueryDTO;
 import com.example.farm.entity.dto.FarmPrinterUpdateDTO;
+import com.example.farm.entity.dto.PrinterPositionUpdateDTO;
 import com.example.farm.entity.dto.PrinterScanResultDTO;
 
 import java.util.List;
@@ -120,6 +121,17 @@ public interface FarmPrinterService extends IService<FarmPrinter> {
      * @return 是否成功释放了其他设备的 IP
      */
     boolean releaseIpAddress(String ipAddress, String excludeMac);
+
+    /**
+     * 【新增】批量更新打印机物理位置坐标（用于数字孪生看板拖拽）。
+     * <p>接收前端拖拽后的坐标变更，批量更新设备的 grid_row 和 grid_col。</p>
+     * <p>如果传入 null，表示将该设备移回待分配区。</p>
+     *
+     * @param positionUpdates 位置更新列表（包含 id, gridRow, gridCol）
+     * @return 成功更新的设备数量
+     * @throws BusinessException 当参数非法或设备不存在时抛出
+     */
+    int batchUpdatePositions(List<PrinterPositionUpdateDTO> positionUpdates);
 
     /**
      * 批量操作结果封装类

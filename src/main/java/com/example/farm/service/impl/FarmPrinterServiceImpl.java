@@ -9,6 +9,7 @@ import com.example.farm.entity.FarmPrinter;
 import com.example.farm.entity.dto.FarmPrinterAddDTO;
 import com.example.farm.entity.dto.FarmPrinterQueryDTO;
 import com.example.farm.entity.dto.FarmPrinterUpdateDTO;
+import com.example.farm.entity.dto.PrinterPositionUpdateDTO;
 import com.example.farm.entity.dto.PrinterScanResultDTO;
 import com.example.farm.mapper.FarmPrinterMapper;
 import com.example.farm.service.FarmPrinterService;
@@ -216,6 +217,7 @@ public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmP
         existingPrinter.setApiKey(dto.getApiKey());
         existingPrinter.setCurrentMaterial(dto.getCurrentMaterial());
         existingPrinter.setNozzleSize(dto.getNozzleSize());
+        existingPrinter.setMachineNumber(dto.getMachineNumber());
         existingPrinter.setUpdatedAt(LocalDateTime.now());
 
         this.updateById(existingPrinter);
@@ -567,5 +569,89 @@ public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmP
         }
 
         return false;
+    }
+
+    // ==================== 物理位置管理 ====================
+
+    /**
+     * 【新增】批量更新打印机物理位置坐标（用于数字孪生看板拖拽）
+     * <p>接收前端拖拽后的坐标变更，批量更新设备的 grid_row 和 grid_col。</p>
+     * <p>业务规则：</p>
+     * <ul>
+     *     <li>传入 null 表示将该设备移回待分配区</li>
+     *     <li>gridRow 范围：1-4</li>
+     *     <li>gridCol 范围：1-12</li>
+     * </ul>
+     *
+     * @param positionUpdates 位置更新列表
+     * @return 成功更新的设备数量
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int batchUpdatePositions(List<PrinterPositionUpdateDTO> positionUpdates) {
+        if (positionUpdates == null || positionUpdates.isEmpty()) {
+            log.warn("批量更新位置跳过：参数为空");
+            return 0;
+        }
+
+        int successCount = 0;
+        int failCount = 0;
+
+        log.info("开始批量更新打印机位置：共 {} 台设备", positionUpdates.size());
+
+        for (PrinterPositionUpdateDTO update : positionUpdates) {
+            try {
+                // 参数校验
+                if (update.getId() == null) {
+                    log.warn("跳过无效的位置更新：设备 ID 为空");
+                    failCount++;
+                    continue;
+                }
+
+                // 校验坐标范围（如果有值的话）
+                Integer gridRow = update.getGridRow();
+                Integer gridCol = update.getGridCol();
+
+                if (gridRow != null && (gridRow < 1 || gridRow > 4)) {
+                    log.warn("跳过无效的位置更新：gridRow 超出范围 [1-4]，id={}，gridRow={}",
+                            update.getId(), gridRow);
+                    failCount++;
+                    continue;
+                }
+
+                if (gridCol != null && (gridCol < 1 || gridCol > 12)) {
+                    log.warn("跳过无效的位置更新：gridCol 超出范围 [1-12]，id={}，gridCol={}",
+                            update.getId(), gridCol);
+                    failCount++;
+                    continue;
+                }
+
+                // 检查设备是否存在
+                FarmPrinter printer = this.getById(update.getId());
+                if (printer == null) {
+                    log.warn("更新位置失败：打印机不存在，id={}", update.getId());
+                    failCount++;
+                    continue;
+                }
+
+                // 执行更新
+                int affected = baseMapper.updatePrinterPosition(update.getId(), gridRow, gridCol);
+                if (affected > 0) {
+                    successCount++;
+                    log.debug("更新设备位置成功：id={}, gridRow={}, gridCol={}",
+                            update.getId(), gridRow, gridCol);
+                } else {
+                    log.warn("更新设备位置失败：id={}", update.getId());
+                    failCount++;
+                }
+
+            } catch (Exception e) {
+                log.error("更新设备位置异常：id={}, 原因={}", update.getId(), e.getMessage());
+                failCount++;
+            }
+        }
+
+        log.info("批量更新位置完成：成功 {} 台，失败 {} 台", successCount, failCount);
+        return successCount;
     }
 }

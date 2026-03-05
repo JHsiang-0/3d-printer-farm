@@ -25,28 +25,35 @@
     <!-- 基于 MAC 地址的 Upsert 操作：存在则更新，不存在则插入 -->
     <insert id="upsertByMacAddress">
         INSERT INTO farm_printer (
-            name, ip_address, mac_address, firmware_type, api_key, status, current_material, nozzle_size, created_at, updated_at
+            name, ip_address, mac_address, firmware_type, api_key, status,
+            current_material, nozzle_size, machine_number, grid_row, grid_col,
+            created_at, updated_at
         ) VALUES (
                     #{name}, #{ipAddress}, #{macAddress}, #{firmwareType}, #{apiKey}, #{status},
-                    #{currentMaterial}, #{nozzleSize}, NOW(), NOW()
+                    #{currentMaterial}, #{nozzleSize}, #{machineNumber}, #{gridRow}, #{gridCol},
+                    NOW(), NOW()
                 )
             ON DUPLICATE KEY UPDATE
                                  ip_address = VALUES(ip_address),
                                  status = VALUES(status),
                                  firmware_type = VALUES(firmware_type),
                                  api_key = VALUES(api_key),
+                                 machine_number = VALUES(machine_number),
                                  updated_at = NOW()
     </insert>
 
     <!-- 批量 Upsert 操作 -->
     <insert id="batchUpsert">
         INSERT INTO farm_printer (
-            name, ip_address, mac_address, firmware_type, api_key, status, current_material, nozzle_size, created_at, updated_at
+            name, ip_address, mac_address, firmware_type, api_key, status,
+            current_material, nozzle_size, machine_number, grid_row, grid_col,
+            created_at, updated_at
         ) VALUES
         <foreach collection="list" item="item" separator=",">
             (
             #{item.name}, #{item.ipAddress}, #{item.macAddress}, #{item.firmwareType}, #{item.apiKey}, #{item.status},
-            #{item.currentMaterial}, #{item.nozzleSize}, NOW(), NOW()
+            #{item.currentMaterial}, #{item.nozzleSize}, #{item.machineNumber}, #{item.gridRow}, #{item.gridCol},
+            NOW(), NOW()
             )
         </foreach>
         ON DUPLICATE KEY UPDATE
@@ -54,6 +61,7 @@
         status = VALUES(status),
         firmware_type = VALUES(firmware_type),
         api_key = VALUES(api_key),
+        machine_number = VALUES(machine_number),
         updated_at = NOW()
     </insert>
 
@@ -74,5 +82,14 @@
             #{mac}
         </foreach>
     </select>
+
+    <!-- 【新增】更新打印机物理位置坐标（用于数字孪生看板拖拽） -->
+    <update id="updatePrinterPosition">
+        UPDATE farm_printer
+        SET grid_row = #{gridRow},
+            grid_col = #{gridCol},
+            updated_at = NOW()
+        WHERE id = #{id}
+    </update>
 
 </mapper>
