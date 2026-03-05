@@ -190,22 +190,200 @@
 ## 5. 打印机（`/api/v1/printers`）
 
 ### 5.1 分页查询
-- `GET /api/v1/printers/page`
+- `GET /api/v1/printers/page?pageNum=1&pageSize=10`
+- 支持按名称和状态筛选
 
-### 5.2 新增
+### 5.2 新增打印机（基于 MAC Upsert）
 - `POST /api/v1/printers/add`
 
-### 5.3 更新
+**核心逻辑**：基于 MAC 地址的 Upsert 机制
+- MAC 已存在 → 更新该设备的 IP 和状态为 ONLINE（设备换了 IP 重新上线）
+- MAC 不存在 → 插入新记录（真正的新设备）
+
+请求体：
+```json
+{
+  "name": "Printer_3456",
+  "ipAddress": "192.168.1.100",
+  "macAddress": "b8:27:eb:12:34:56",
+  "firmwareType": "Klipper",
+  "apiKey": "optional_api_key"
+}
+```
+
+字段说明：
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `name` | 否 | 打印机名称，不传则自动生成（如 Printer_3456） |
+| `ipAddress` | **是** | 局域网 IP 地址 |
+| `macAddress` | 否 | MAC 地址，不传则后端自动获取 |
+| `firmwareType` | 否 | 固件类型，默认 Klipper |
+| `apiKey` | 否 | Moonraker API 密钥 |
+
+### 5.3 更新打印机
 - `PUT /api/v1/printers/update`
 
-### 5.4 删除
-- `DELETE /api/v1/printers/delete/{id}`
+请求体：
+```json
+{
+  "id": 1,
+  "name": "Updated Name",
+  "ipAddress": "192.168.1.101",
+  "macAddress": "b8:27:eb:12:34:56",
+  "firmwareType": "Klipper",
+  "apiKey": "new_api_key",
+  "currentMaterial": "PLA",
+  "nozzleSize": 0.4,
+  "machineNumber": "P001"
+}
+```
 
-### 5.5 局域网扫描
+> **注意**：修改 IP 时会自动处理 IP 冲突（将占用该 IP 的旧设备下线）
+
+### 5.4 删除打印机
+- `DELETE /api/v1/printers/delete/{id}`
+- **限制**：正在打印中的设备无法删除
+
+### 5.5 局域网扫描（带 MAC 识别）
 - `GET /api/v1/printers/scan?subnet=192.168.1`
 
-### 5.6 批量新增
+**功能说明**：
+- 并发扫描网段内所有 IP 的 7125 端口（Klipper/Moonraker 默认端口）
+- 对响应的设备尝试获取 MAC 地址（ARP 表或 Moonraker API）
+- 与数据库对比，标记新旧设备状态
+
+响应 `data`：
+```json
+[
+  {
+    "ipAddress": "192.168.1.100",
+    "macAddress": "b8:27:eb:12:34:56",
+    "firmwareType": "Klipper",
+    "isNewDevice": true,
+    "status": "NEW",
+    "suggestedName": "Printer_3456"
+  },
+  {
+    "ipAddress": "192.168.1.101",
+    "macAddress": "b8:27:eb:78:9a:bc",
+    "firmwareType": "Klipper",
+    "isNewDevice": false,
+    "status": "EXISTING",
+    "suggestedName": "Printer_9abc"
+  }
+]
+```
+
+状态说明：
+| status | 含义 |
+|--------|------|
+| `NEW` | 新设备（MAC 不在数据库中） |
+| `EXISTING` | 已知设备（MAC 已存在） |
+| `UNKNOWN_MAC` | 无法获取 MAC 地址，需手动处理 |
+
+### 5.6 批量新增/更新（基于 MAC Upsert）⭐
 - `POST /api/v1/printers/batch-add`
+
+**核心功能**：解决 DHCP 动态分配导致的设备重复录入问题
+
+请求体（扫描结果数组）：
+```json
+[
+  {
+    "ipAddress": "192.168.1.100",
+    "macAddress": "b8:27:eb:12:34:56",
+    "firmwareType": "Klipper",
+    "isNewDevice": true,
+    "suggestedName": "Printer_3456"
+  },
+  {
+    "ipAddress": "192.168.1.101",
+    "macAddress": "b8:27:eb:78:9a:bc",
+    "firmwareType": "Klipper",
+    "isNewDevice": false,
+    "suggestedName": "Printer_9abc"
+  }
+]
+```
+
+响应 `data`：
+```json
+{
+  "totalCount": 2,
+  "insertedCount": 1,
+  "updatedCount": 1,
+  "failedCount": 0,
+  "message": "批量处理完成：新增 1 台，更新 1 台，失败 0 台"
+}
+```
+
+处理逻辑：
+1. **防 IP 冲突**：若 IP 被其他 MAC 设备占用，先将旧设备 IP 设为 NULL，状态设为 OFFLINE
+2. **基于 MAC 的 Upsert**：使用 MySQL `ON DUPLICATE KEY UPDATE` 实现原子性操作
+3. **降级处理**：无 MAC 地址的设备仍可通过普通插入添加
+
+### 5.7 批量更新物理位置（数字孪生看板）⭐
+- `POST /api/v1/printers/batch-update-positions`
+
+**功能**：更新打印机在数字孪生看板上的物理位置坐标
+
+请求体：
+```json
+[
+  {
+    "id": 1,
+    "gridRow": 2,
+    "gridCol": 3
+  },
+  {
+    "id": 2,
+    "gridRow": 1,
+    "gridCol": 5
+  }
+]
+```
+
+字段说明：
+| 字段 | 必填 | 范围 | 说明 |
+|------|------|------|------|
+| `id` | **是** | - | 打印机 ID |
+| `gridRow` | 否 | 1-4 | 网格行号（null 表示移回待分配区） |
+| `gridCol` | 否 | 1-12 | 网格列号（null 表示移回待分配区） |
+
+> **业务规则**：传入 null 可将设备移回"待分配区"
+
+---
+
+## 5.x 打印机数据结构
+
+### FarmPrinter 实体字段
+```json
+{
+  "id": 1,
+  "name": "Printer_3456",
+  "ipAddress": "192.168.1.100",
+  "macAddress": "b8:27:eb:12:34:56",
+  "firmwareType": "Klipper",
+  "apiKey": "optional_key",
+  "status": "ONLINE",
+  "currentMaterial": "PLA",
+  "nozzleSize": 0.4,
+  "machineNumber": "P001",
+  "gridRow": 2,
+  "gridCol": 3,
+  "createdAt": "2026-03-05T10:30:00",
+  "updatedAt": "2026-03-05T14:20:00"
+}
+```
+
+状态枚举：
+| status | 说明 |
+|--------|------|
+| `ONLINE` | 在线 |
+| `OFFLINE` | 离线 |
+| `PRINTING` | 打印中 |
+| `PAUSED` | 暂停 |
+| `ERROR` | 错误 |
 
 ---
 
