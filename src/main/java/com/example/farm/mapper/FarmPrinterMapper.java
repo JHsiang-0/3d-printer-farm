@@ -3,6 +3,9 @@ package com.example.farm.mapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.example.farm.entity.FarmPrinter;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
+
+import java.util.List;
 
 /**
  * <p>
@@ -15,4 +18,66 @@ import org.apache.ibatis.annotations.Mapper;
 @Mapper
 public interface FarmPrinterMapper extends BaseMapper<FarmPrinter> {
 
+    /**
+     * 根据 MAC 地址查询打印机
+     *
+     * @param macAddress MAC 地址
+     * @return 打印机实体
+     */
+    FarmPrinter selectByMacAddress(@Param("macAddress") String macAddress);
+
+    /**
+     * 根据 IP 地址查询打印机
+     *
+     * @param ipAddress IP 地址
+     * @return 打印机实体
+     */
+    FarmPrinter selectByIpAddress(@Param("ipAddress") String ipAddress);
+
+    /**
+     * 释放被占用的 IP 地址
+     * <p>将占用该 IP 的其他设备的 IP 设为 NULL，状态设为 OFFLINE</p>
+     *
+     * @param ipAddress 要释放的 IP 地址
+     * @param excludeMac 排除的 MAC 地址（当前要使用该 IP 的设备）
+     * @return 影响的行数
+     */
+    int releaseIpAddress(@Param("ipAddress") String ipAddress, @Param("excludeMac") String excludeMac);
+
+    /**
+     * 基于 MAC 地址的 Upsert 操作
+     * <p>如果 MAC 地址存在则更新，不存在则插入</p>
+     *
+     * @param printer 打印机实体
+     * @return 影响的行数
+     */
+    int upsertByMacAddress(FarmPrinter printer);
+
+    /**
+     * 批量 Upsert 操作
+     *
+     * @param printers 打印机列表
+     * @return 影响的行数
+     */
+    int batchUpsert(@Param("list") List<FarmPrinter> printers);
+
+    /**
+     * 根据 MAC 地址更新 IP 和状态
+     *
+     * @param macAddress MAC 地址
+     * @param ipAddress 新的 IP 地址
+     * @param status 新的状态
+     * @return 影响的行数
+     */
+    int updateIpAndStatusByMac(@Param("macAddress") String macAddress,
+                               @Param("ipAddress") String ipAddress,
+                               @Param("status") String status);
+
+    /**
+     * 统计指定 MAC 地址列表在数据库中的数量
+     *
+     * @param macList MAC 地址列表
+     * @return 存在的数量
+     */
+    Long countByMacAddresses(@Param("macList") List<String> macList);
 }

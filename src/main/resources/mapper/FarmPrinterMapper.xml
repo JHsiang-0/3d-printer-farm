@@ -2,4 +2,77 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.example.farm.mapper.FarmPrinterMapper">
 
+    <!-- 根据 MAC 地址查询打印机 -->
+    <select id="selectByMacAddress" resultType="com.example.farm.entity.FarmPrinter">
+        SELECT * FROM farm_printer WHERE mac_address = #{macAddress} LIMIT 1
+    </select>
+
+    <!-- 根据 IP 地址查询打印机 -->
+    <select id="selectByIpAddress" resultType="com.example.farm.entity.FarmPrinter">
+        SELECT * FROM farm_printer WHERE ip_address = #{ipAddress} LIMIT 1
+    </select>
+
+    <!-- 释放被占用的 IP 地址（将对应设备的 IP 设为 NULL，状态设为 OFFLINE） -->
+    <update id="releaseIpAddress">
+        UPDATE farm_printer
+        SET ip_address = NULL,
+            status = 'OFFLINE',
+            updated_at = NOW()
+        WHERE ip_address = #{ipAddress}
+          AND (mac_address IS NULL OR mac_address != #{excludeMac})
+    </update>
+
+    <!-- 基于 MAC 地址的 Upsert 操作：存在则更新，不存在则插入 -->
+    <insert id="upsertByMacAddress">
+        INSERT INTO farm_printer (
+            name, ip_address, mac_address, firmware_type, api_key, status, current_material, nozzle_size, created_at, updated_at
+        ) VALUES (
+                    #{name}, #{ipAddress}, #{macAddress}, #{firmwareType}, #{apiKey}, #{status},
+                    #{currentMaterial}, #{nozzleSize}, NOW(), NOW()
+                )
+            ON DUPLICATE KEY UPDATE
+                                 ip_address = VALUES(ip_address),
+                                 status = VALUES(status),
+                                 firmware_type = VALUES(firmware_type),
+                                 api_key = VALUES(api_key),
+                                 updated_at = NOW()
+    </insert>
+
+    <!-- 批量 Upsert 操作 -->
+    <insert id="batchUpsert">
+        INSERT INTO farm_printer (
+            name, ip_address, mac_address, firmware_type, api_key, status, current_material, nozzle_size, created_at, updated_at
+        ) VALUES
+        <foreach collection="list" item="item" separator=",">
+            (
+            #{item.name}, #{item.ipAddress}, #{item.macAddress}, #{item.firmwareType}, #{item.apiKey}, #{item.status},
+            #{item.currentMaterial}, #{item.nozzleSize}, NOW(), NOW()
+            )
+        </foreach>
+        ON DUPLICATE KEY UPDATE
+        ip_address = VALUES(ip_address),
+        status = VALUES(status),
+        firmware_type = VALUES(firmware_type),
+        api_key = VALUES(api_key),
+        updated_at = NOW()
+    </insert>
+
+    <!-- 更新打印机的 IP 和状态（用于 DHCP 重新分配后的设备上线） -->
+    <update id="updateIpAndStatusByMac">
+        UPDATE farm_printer
+        SET ip_address = #{ipAddress},
+            status = #{status},
+            updated_at = NOW()
+        WHERE mac_address = #{macAddress}
+    </update>
+
+    <!-- 统计当前数据库中的 MAC 地址数量 -->
+    <select id="countByMacAddresses" resultType="java.lang.Long">
+        SELECT COUNT(*) FROM farm_printer
+        WHERE mac_address IN
+        <foreach collection="macList" item="mac" open="(" separator="," close=")">
+            #{mac}
+        </foreach>
+    </select>
+
 </mapper>
