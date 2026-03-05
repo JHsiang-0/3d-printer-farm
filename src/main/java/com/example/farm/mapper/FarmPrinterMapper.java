@@ -2,6 +2,7 @@ package com.example.farm.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.example.farm.entity.FarmPrinter;
+import com.example.farm.entity.vo.PrinterVO;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -93,4 +94,14 @@ public interface FarmPrinterMapper extends BaseMapper<FarmPrinter> {
     int updatePrinterPosition(@Param("id") Long id,
                               @Param("gridRow") Integer gridRow,
                               @Param("gridCol") Integer gridCol);
+
+    /**
+     * 【新增】查询所有未分配位置的打印机
+     * <p>用于数字孪生看板的空槽位绑定下拉列表</p>
+     * <p>查询条件：grid_row IS NULL AND grid_col IS NULL</p>
+     *
+     * @param keyword 可选的搜索关键字（匹配 name 或 machine_number）
+     * @return 未分配位置的打印机精简信息列表
+     */
+    List<PrinterVO> selectUnallocatedPrinters(@Param("keyword") String keyword);
 }

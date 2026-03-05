@@ -11,6 +11,7 @@ import com.example.farm.entity.dto.FarmPrinterQueryDTO;
 import com.example.farm.entity.dto.FarmPrinterUpdateDTO;
 import com.example.farm.entity.dto.PrinterPositionUpdateDTO;
 import com.example.farm.entity.dto.PrinterScanResultDTO;
+import com.example.farm.entity.vo.PrinterVO;
 import com.example.farm.mapper.FarmPrinterMapper;
 import com.example.farm.service.FarmPrinterService;
 import com.example.farm.service.PrinterCacheService;
@@ -158,14 +159,25 @@ public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmP
                     ? dto.getFirmwareType() : "Klipper");
             newPrinter.setApiKey(dto.getApiKey());
             newPrinter.setStatus("ONLINE");
-            newPrinter.setCurrentMaterial("ABS");
-            newPrinter.setNozzleSize(new BigDecimal("0.40"));
+
+            // 设置耗材和喷嘴（使用传入值或默认值）
+            newPrinter.setCurrentMaterial(StringUtils.hasText(dto.getCurrentMaterial())
+                    ? dto.getCurrentMaterial() : "ABS");
+            newPrinter.setNozzleSize(dto.getNozzleSize() != null
+                    ? dto.getNozzleSize() : new BigDecimal("0.40"));
+
+            // 设置设备编号和物理位置
+            newPrinter.setMachineNumber(dto.getMachineNumber());
+            newPrinter.setGridRow(dto.getGridRow());
+            newPrinter.setGridCol(dto.getGridCol());
+
             newPrinter.setCreatedAt(LocalDateTime.now());
             newPrinter.setUpdatedAt(LocalDateTime.now());
 
             this.save(newPrinter);
-            log.info("新增设备成功: ID={}, MAC={}, IP={}",
-                    newPrinter.getId(), macAddress, ipAddress);
+            log.info("新增设备成功: ID={}, MAC={}, IP={}, machineNumber={}, gridRow={}, gridCol={}",
+                    newPrinter.getId(), macAddress, ipAddress,
+                    dto.getMachineNumber(), dto.getGridRow(), dto.getGridCol());
         }
     }
 
@@ -210,6 +222,7 @@ public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmP
             releaseIpIfOccupied(dto.getIpAddress(), currentMac);
         }
 
+        // 更新基础信息
         existingPrinter.setName(dto.getName());
         existingPrinter.setIpAddress(dto.getIpAddress());
         existingPrinter.setMacAddress(dto.getMacAddress());
@@ -218,11 +231,17 @@ public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmP
         existingPrinter.setCurrentMaterial(dto.getCurrentMaterial());
         existingPrinter.setNozzleSize(dto.getNozzleSize());
         existingPrinter.setMachineNumber(dto.getMachineNumber());
+
+        // 更新物理位置（数字孪生看板用）
+        existingPrinter.setGridRow(dto.getGridRow());
+        existingPrinter.setGridCol(dto.getGridCol());
+
         existingPrinter.setUpdatedAt(LocalDateTime.now());
 
         this.updateById(existingPrinter);
-        log.info("更新打印机成功：id={}, name={}, ip={}",
-                existingPrinter.getId(), existingPrinter.getName(), existingPrinter.getIpAddress());
+        log.info("更新打印机成功：id={}, name={}, ip={}, gridRow={}, gridCol={}",
+                existingPrinter.getId(), existingPrinter.getName(), existingPrinter.getIpAddress(),
+                dto.getGridRow(), dto.getGridCol());
 
         printerCacheService.refreshPrinterCache();
     }
@@ -653,5 +672,26 @@ public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmP
 
         log.info("批量更新位置完成：成功 {} 台，失败 {} 台", successCount, failCount);
         return successCount;
+    }
+
+    // ==================== 未分配位置设备查询 ====================
+
+    /**
+     * 【新增】获取所有未分配位置的打印机列表。
+     * <p>用于数字孪生看板的空槽位绑定下拉列表。</p>
+     * <p>查询条件：grid_row IS NULL AND grid_col IS NULL</p>
+     *
+     * @param keyword 可选的搜索关键字（匹配 name 或 machine_number）
+     * @return 未分配位置的打印机精简信息列表
+     */
+    @Override
+    public List<PrinterVO> getUnallocatedPrinters(String keyword) {
+        log.info("查询未分配位置的打印机列表，keyword={}", keyword);
+
+        // 调用 Mapper 查询（支持可选的关键字过滤）
+        List<PrinterVO> unallocatedPrinters = baseMapper.selectUnallocatedPrinters(keyword);
+
+        log.info("查询到 {} 台未分配位置的打印机", unallocatedPrinters.size());
+        return unallocatedPrinters;
     }
 }

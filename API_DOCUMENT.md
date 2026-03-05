@@ -203,11 +203,16 @@
 请求体：
 ```json
 {
-  "name": "Printer_3456",
+  "name": "Voron-2.4-01",
   "ipAddress": "192.168.1.100",
   "macAddress": "b8:27:eb:12:34:56",
   "firmwareType": "Klipper",
-  "apiKey": "optional_api_key"
+  "apiKey": "optional_api_key",
+  "currentMaterial": "ABS",
+  "nozzleSize": 0.40,
+  "machineNumber": "P001",
+  "gridRow": 2,
+  "gridCol": 3
 }
 ```
 
@@ -219,6 +224,11 @@
 | `macAddress` | 否 | MAC 地址，不传则后端自动获取 |
 | `firmwareType` | 否 | 固件类型，默认 Klipper |
 | `apiKey` | 否 | Moonraker API 密钥 |
+| `currentMaterial` | 否 | 当前装载耗材，默认 ABS |
+| `nozzleSize` | 否 | 喷嘴直径，默认 0.40 |
+| `machineNumber` | 否 | 设备编号/机台号 |
+| `gridRow` | 否 | 网格行号（1-4），null 表示待分配区 |
+| `gridCol` | 否 | 网格列号（1-12），null 表示待分配区 |
 
 ### 5.3 更新打印机
 - `PUT /api/v1/printers/update`
@@ -227,16 +237,33 @@
 ```json
 {
   "id": 1,
-  "name": "Updated Name",
+  "name": "Voron-2.4-01-Updated",
   "ipAddress": "192.168.1.101",
   "macAddress": "b8:27:eb:12:34:56",
   "firmwareType": "Klipper",
   "apiKey": "new_api_key",
-  "currentMaterial": "PLA",
-  "nozzleSize": 0.4,
-  "machineNumber": "P001"
+  "currentMaterial": "PETG",
+  "nozzleSize": 0.6,
+  "machineNumber": "P001",
+  "gridRow": 3,
+  "gridCol": 5
 }
 ```
+
+字段说明：
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `id` | **是** | 打印机 ID |
+| `name` | 否 | 打印机名称 |
+| `ipAddress` | 否 | 局域网 IP 地址 |
+| `macAddress` | 否 | MAC 地址 |
+| `firmwareType` | 否 | 固件类型 |
+| `apiKey` | 否 | Moonraker API 密钥 |
+| `currentMaterial` | 否 | 当前装载耗材 |
+| `nozzleSize` | 否 | 喷嘴直径 |
+| `machineNumber` | 否 | 设备编号/机台号 |
+| `gridRow` | 否 | 网格行号（1-4），null 表示移回待分配区 |
+| `gridCol` | 否 | 网格列号（1-12），null 表示移回待分配区 |
 
 > **注意**：修改 IP 时会自动处理 IP 冲突（将占用该 IP 的旧设备下线）
 
@@ -323,7 +350,7 @@
 3. **降级处理**：无 MAC 地址的设备仍可通过普通插入添加
 
 ### 5.7 批量更新物理位置（数字孪生看板）⭐
-- `POST /api/v1/printers/batch-update-positions`
+- `PUT /api/v1/printers/positions`
 
 **功能**：更新打印机在数字孪生看板上的物理位置坐标
 
@@ -351,6 +378,50 @@
 | `gridCol` | 否 | 1-12 | 网格列号（null 表示移回待分配区） |
 
 > **业务规则**：传入 null 可将设备移回"待分配区"
+
+### 5.8 获取未分配位置的打印机列表（数字孪生看板）⭐
+- `GET /api/v1/printers/unallocated`
+
+**功能**：查询所有尚未分配物理坐标的设备（grid_row IS NULL AND grid_col IS NULL），用于数字孪生看板的空槽位绑定下拉列表
+
+**查询参数**：
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `keyword` | String | 否 | 搜索关键字，支持模糊匹配 `name` 或 `machine_number` |
+
+**响应 `data`**：
+```json
+[
+  {
+    "id": 1,
+    "name": "Voron-2.4-01",
+    "machineNumber": "P001",
+    "ipAddress": "192.168.1.100",
+    "macAddress": "b8:27:eb:12:34:56",
+    "status": "IDLE"
+  },
+  {
+    "id": 2,
+    "name": "Voron-2.4-02",
+    "machineNumber": "P002",
+    "ipAddress": "192.168.1.101",
+    "macAddress": "b8:27:eb:78:9a:bc",
+    "status": "OFFLINE"
+  }
+]
+```
+
+返回字段说明：
+| 字段 | 说明 |
+|------|------|
+| `id` | 打印机主键 ID |
+| `name` | 打印机名称 |
+| `machineNumber` | 设备编号/机台号 |
+| `ipAddress` | 局域网 IP 地址 |
+| `macAddress` | MAC 地址 |
+| `status` | 业务状态：IDLE, PRINTING, OFFLINE, ERROR, MAINTENANCE |
+
+> **使用场景**：前端点击数字孪生看板上的"空槽位"时，调用此接口获取可绑定的设备列表
 
 ---
 

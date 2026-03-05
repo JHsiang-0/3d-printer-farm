@@ -92,4 +92,25 @@
         WHERE id = #{id}
     </update>
 
+    <!-- 【新增】查询所有未分配位置的打印机（用于数字孪生看板空槽位绑定下拉列表） -->
+    <select id="selectUnallocatedPrinters" resultType="com.example.farm.entity.vo.PrinterVO">
+        SELECT
+            id,
+            name,
+            machine_number AS machineNumber,
+            ip_address AS ipAddress,
+            mac_address AS macAddress,
+            status
+        FROM farm_printer
+        WHERE grid_row IS NULL
+          AND grid_col IS NULL
+        <if test="keyword != null and keyword != ''">
+            AND (
+                name LIKE CONCAT('%', #{keyword}, '%')
+                OR machine_number LIKE CONCAT('%', #{keyword}, '%')
+            )
+        </if>
+        ORDER BY created_at DESC
+    </select>
+
 </mapper>

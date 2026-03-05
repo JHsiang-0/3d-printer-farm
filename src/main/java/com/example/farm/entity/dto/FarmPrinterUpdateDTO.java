@@ -38,4 +38,10 @@ public class FarmPrinterUpdateDTO {
 
     @Schema(description = "设备编号/机台号（用于产线管理）")
     private String machineNumber;
+
+    @Schema(description = "物理位置 - 网格行号（数字孪生看板用，1-4，null 表示待分配区）")
+    private Integer gridRow;
+
+    @Schema(description = "物理位置 - 网格列号（数字孪生看板用，1-12，null 表示待分配区）")
+    private Integer gridCol;
 }

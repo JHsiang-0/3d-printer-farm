@@ -9,7 +9,11 @@ import com.example.farm.entity.dto.FarmPrinterQueryDTO;
 import com.example.farm.entity.dto.FarmPrinterUpdateDTO;
 import com.example.farm.entity.dto.PrinterPositionUpdateDTO;
 import com.example.farm.entity.dto.PrinterScanResultDTO;
+import com.example.farm.entity.vo.PrinterVO;
 import com.example.farm.service.FarmPrinterService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
@@ -24,6 +28,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/v1/printers")
 @RequiredArgsConstructor
+@Tag(name = "打印机管理", description = "打印机资产与状态管理相关接口")
 public class FarmPrinterController {
 
     private final FarmPrinterService printerService;
@@ -239,6 +244,7 @@ public class FarmPrinterController {
      * @throws BusinessException 当参数为空时抛出
      */
     @PutMapping("/positions")
+    @Operation(summary = "批量更新打印机物理位置", description = "用于数字孪生看板拖拽后更新设备坐标")
     public Result<String> batchUpdatePositions(
             @RequestBody List<PrinterPositionUpdateDTO> positionUpdates) {
         if (positionUpdates == null || positionUpdates.isEmpty()) {
@@ -251,5 +257,25 @@ public class FarmPrinterController {
                 successCount, positionUpdates.size());
 
         return Result.success(null, message);
+    }
+
+    /**
+     * 【新增】获取所有未分配位置的打印机列表（用于数字孪生看板空槽位绑定下拉列表）
+     * <p>查询条件：grid_row IS NULL AND grid_col IS NULL</p>
+     * <p>返回精简字段：id, name, machineNumber, ipAddress, macAddress, status</p>
+     *
+     * @param keyword 可选的搜索关键字（匹配 name 或 machine_number）
+     * @return 未分配位置的打印机列表
+     */
+    @GetMapping("/unallocated")
+    @Operation(summary = "获取未分配位置的打印机列表", description = "用于数字孪生看板的空槽位绑定下拉列表，查询条件：grid_row IS NULL AND grid_col IS NULL")
+    public Result<List<PrinterVO>> getUnallocatedPrinters(
+            @Parameter(description = "搜索关键字（可选），支持模糊匹配 name 或 machine_number")
+            @RequestParam(required = false) String keyword) {
+
+        List<PrinterVO> unallocatedPrinters = printerService.getUnallocatedPrinters(keyword);
+
+        String message = String.format("查询到 %d 台未分配位置的设备", unallocatedPrinters.size());
+        return Result.success(unallocatedPrinters, message);
     }
 }

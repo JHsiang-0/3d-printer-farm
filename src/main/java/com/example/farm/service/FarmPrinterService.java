@@ -9,6 +9,7 @@ import com.example.farm.entity.dto.FarmPrinterQueryDTO;
 import com.example.farm.entity.dto.FarmPrinterUpdateDTO;
 import com.example.farm.entity.dto.PrinterPositionUpdateDTO;
 import com.example.farm.entity.dto.PrinterScanResultDTO;
+import com.example.farm.entity.vo.PrinterVO;
 
 import java.util.List;
 
@@ -132,6 +133,16 @@ public interface FarmPrinterService extends IService<FarmPrinter> {
      * @throws BusinessException 当参数非法或设备不存在时抛出
      */
     int batchUpdatePositions(List<PrinterPositionUpdateDTO> positionUpdates);
+
+    /**
+     * 【新增】获取所有未分配位置的打印机列表。
+     * <p>用于数字孪生看板的空槽位绑定下拉列表。</p>
+     * <p>查询条件：grid_row IS NULL AND grid_col IS NULL</p>
+     *
+     * @param keyword 可选的搜索关键字（匹配 name 或 machine_number）
+     * @return 未分配位置的打印机精简信息列表
+     */
+    List<PrinterVO> getUnallocatedPrinters(String keyword);
 
     /**
      * 批量操作结果封装类
