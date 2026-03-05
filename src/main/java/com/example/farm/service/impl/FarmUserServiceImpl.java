@@ -10,7 +10,14 @@ import com.example.farm.common.utils.JwtUtils;
 import com.example.farm.common.utils.LoginProtectUtil;
 import com.example.farm.common.utils.PasswordMigrationUtil;
 import com.example.farm.entity.FarmUser;
-import com.example.farm.entity.dto.*;
+import com.example.farm.entity.dto.ChangePasswordDTO;
+import com.example.farm.entity.dto.LoginResultDTO;
+import com.example.farm.entity.dto.PasswordMigrateResultDTO;
+import com.example.farm.entity.dto.PasswordStatusResultDTO;
+import com.example.farm.entity.dto.UserLoginDTO;
+import com.example.farm.entity.dto.UserQueryDTO;
+import com.example.farm.entity.dto.UserRegisterDTO;
+import com.example.farm.entity.dto.UserUpdateDTO;
 import com.example.farm.mapper.FarmUserMapper;
 import com.example.farm.service.FarmUserService;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +35,10 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class FarmUserServiceImpl extends ServiceImpl<FarmUserMapper, FarmUser> implements FarmUserService {
 
+    private static final String ROLE_ADMIN = "ADMIN";
+    private static final String ROLE_OPERATOR = "OPERATOR";
+    private static final String ROLE_CUSTOMER = "CUSTOMER";
+
     private final PasswordEncoder passwordEncoder;
     private final LoginProtectUtil loginProtectUtil;
 
@@ -39,18 +50,19 @@ public class FarmUserServiceImpl extends ServiceImpl<FarmUserMapper, FarmUser> i
     public LoginResultDTO login(UserLoginDTO loginDTO) {
         String username = loginDTO.getUsername();
 
-        // 先拦截已锁定账号，避免继续参与密码校验，减轻数据库与加密计算压力。
         if (loginProtectUtil.isLocked(username)) {
             long remainingMinutes = loginProtectUtil.getRemainingLockTime(username);
-            log.warn("登录被拒绝：账号已锁定，username={}, 剩余锁定时长={}分钟", username, remainingMinutes);
             throw new BusinessException("账号已锁定，请 " + remainingMinutes + " 分钟后重试");
         }
 
         FarmUser user = findByUsername(username);
         if (user == null) {
             loginProtectUtil.recordLoginFail(username);
-            log.warn("登录失败：用户不存在或凭证错误，username={}", username);
             throw new BusinessException("账号或密码错误");
+        }
+
+        if (loginProtectUtil.isUserDisabled(user.getId())) {
+            throw new BusinessException("用户已被禁用，请联系管理员");
         }
 
         PasswordMigrationUtil.MigrateResult verifyResult = PasswordMigrationUtil.matchesAndMigrate(
@@ -59,7 +71,6 @@ public class FarmUserServiceImpl extends ServiceImpl<FarmUserMapper, FarmUser> i
         if (!verifyResult.isMatches()) {
             int failCount = loginProtectUtil.recordLoginFail(username);
             int remainingAttempts = 5 - failCount;
-            log.warn("登录失败：密码错误，username={}, 剩余尝试次数={}", username, Math.max(remainingAttempts, 0));
             if (remainingAttempts > 0) {
                 throw new BusinessException("账号或密码错误，还剩 " + remainingAttempts + " 次机会");
             }
@@ -68,11 +79,10 @@ public class FarmUserServiceImpl extends ServiceImpl<FarmUserMapper, FarmUser> i
 
         loginProtectUtil.clearLoginFail(username);
 
-        // 登录成功时顺带迁移旧明文密码，能在不打断用户流程的前提下逐步完成存量治理。
         if (verifyResult.needMigration()) {
             user.setPasswordHash(verifyResult.getNewHash());
             updateById(user);
-            log.info("用户 [{}] 的密码已自动迁移为加密存储", user.getUsername());
+            log.info("用户密码已自动迁移为加密存储: username={}", user.getUsername());
         }
 
         String token = JwtUtils.generateToken(user.getId(), user.getUsername(), user.getRole());
@@ -86,7 +96,7 @@ public class FarmUserServiceImpl extends ServiceImpl<FarmUserMapper, FarmUser> i
         result.setEmail(user.getEmail());
         result.setPhone(user.getPhone());
 
-        log.info("用户 [{}] 登录成功", user.getUsername());
+        log.info("用户登录成功: username={}", user.getUsername());
         return result;
     }
 
@@ -108,10 +118,10 @@ public class FarmUserServiceImpl extends ServiceImpl<FarmUserMapper, FarmUser> i
         newUser.setPasswordHash(passwordEncoder.encode(registerDTO.getPassword()));
         newUser.setEmail(registerDTO.getEmail());
         newUser.setPhone(registerDTO.getPhone());
-        newUser.setRole("OPERATOR");
+        newUser.setRole(ROLE_OPERATOR);
 
         save(newUser);
-        log.info("用户 [{}] 注册成功，ID: {}", newUser.getUsername(), newUser.getId());
+        log.info("用户注册成功: username={}, id={}", newUser.getUsername(), newUser.getId());
         return newUser.getId();
     }
 
@@ -143,7 +153,7 @@ public class FarmUserServiceImpl extends ServiceImpl<FarmUserMapper, FarmUser> i
 
         user.setPasswordHash(passwordEncoder.encode(changePasswordDTO.getNewPassword()));
         updateById(user);
-        log.info("用户 [{}] 修改密码成功", user.getUsername());
+        log.info("用户修改密码成功: username={}", user.getUsername());
     }
 
     @Override
@@ -154,7 +164,6 @@ public class FarmUserServiceImpl extends ServiceImpl<FarmUserMapper, FarmUser> i
             throw new BusinessException("用户不存在");
         }
 
-        // 邮箱变更需要先做唯一性校验，避免数据库出现多账号共享邮箱，影响找回与审计。
         if (StringUtils.isNotBlank(updateDTO.getEmail()) && !updateDTO.getEmail().equals(user.getEmail())) {
             if (isEmailExists(updateDTO.getEmail())) {
                 throw new BusinessException("邮箱已被其他用户使用");
@@ -165,12 +174,13 @@ public class FarmUserServiceImpl extends ServiceImpl<FarmUserMapper, FarmUser> i
         if (StringUtils.isNotBlank(updateDTO.getPhone())) {
             user.setPhone(updateDTO.getPhone());
         }
+
         if (StringUtils.isNotBlank(updateDTO.getRole())) {
-            user.setRole(updateDTO.getRole());
+            user.setRole(normalizeRole(updateDTO.getRole()));
         }
 
         updateById(user);
-        log.info("用户 [{}] 信息更新成功", user.getUsername());
+        log.info("用户信息更新成功: username={}", user.getUsername());
     }
 
     @Override
@@ -188,7 +198,6 @@ public class FarmUserServiceImpl extends ServiceImpl<FarmUserMapper, FarmUser> i
         Page<FarmUser> page = new Page<>(queryDTO.getPageNum(), queryDTO.getPageSize());
         LambdaQueryWrapper<FarmUser> wrapper = new LambdaQueryWrapper<>();
 
-        // 仅在前端传了筛选条件时拼接 where，保证一个接口兼容“全量列表”和“条件检索”。
         if (StringUtils.isNotBlank(queryDTO.getUsername())) {
             wrapper.like(FarmUser::getUsername, queryDTO.getUsername());
         }
@@ -200,7 +209,9 @@ public class FarmUserServiceImpl extends ServiceImpl<FarmUserMapper, FarmUser> i
         }
 
         wrapper.orderByDesc(FarmUser::getCreatedAt);
-        return page(page, wrapper);
+        IPage<FarmUser> result = page(page, wrapper);
+        result.getRecords().forEach(u -> u.setPasswordHash(null));
+        return result;
     }
 
     @Override
@@ -213,7 +224,11 @@ public class FarmUserServiceImpl extends ServiceImpl<FarmUserMapper, FarmUser> i
         if (userId.equals(adminId)) {
             throw new BusinessException("不能禁用当前登录账号");
         }
-        log.info("用户 [{}] 已被管理员 [{}] 禁用", user.getUsername(), adminId);
+
+        assertAdmin(adminId);
+        loginProtectUtil.disableUser(userId);
+        loginProtectUtil.clearLoginFail(user.getUsername());
+        log.info("用户已被禁用: targetUserId={}, adminId={}", userId, adminId);
     }
 
     @Override
@@ -223,7 +238,10 @@ public class FarmUserServiceImpl extends ServiceImpl<FarmUserMapper, FarmUser> i
         if (user == null) {
             throw new BusinessException("用户不存在");
         }
-        log.info("用户 [{}] 已被管理员 [{}] 启用", user.getUsername(), adminId);
+
+        assertAdmin(adminId);
+        loginProtectUtil.enableUser(userId);
+        log.info("用户已被启用: targetUserId={}, adminId={}", userId, adminId);
     }
 
     @Override
@@ -256,12 +274,11 @@ public class FarmUserServiceImpl extends ServiceImpl<FarmUserMapper, FarmUser> i
                 continue;
             }
 
-            // 仅迁移非空明文，避免把脏数据写成“合法加密值”掩盖数据质量问题。
             if (currentHash != null && !currentHash.isEmpty()) {
                 user.setPasswordHash(passwordEncoder.encode(currentHash));
                 updateById(user);
                 migratedCount++;
-                log.info("用户 [{}] 的密码已迁移", user.getUsername());
+                log.info("用户密码已迁移: username={}", user.getUsername());
             }
         }
 
@@ -284,12 +301,27 @@ public class FarmUserServiceImpl extends ServiceImpl<FarmUserMapper, FarmUser> i
         return new PasswordStatusResultDTO(encryptedCount, plainCount, encryptedCount + plainCount);
     }
 
-    /**
-     * 根据用户名查询用户。
-     */
     private FarmUser findByUsername(String username) {
         LambdaQueryWrapper<FarmUser> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(FarmUser::getUsername, username);
         return getOne(wrapper);
+    }
+
+    private void assertAdmin(Long adminId) {
+        FarmUser admin = getById(adminId);
+        if (admin == null) {
+            throw new BusinessException("管理员账号不存在");
+        }
+        if (!ROLE_ADMIN.equalsIgnoreCase(admin.getRole())) {
+            throw new BusinessException("当前用户无管理员权限");
+        }
+    }
+
+    private String normalizeRole(String role) {
+        String normalized = role == null ? null : role.trim().toUpperCase();
+        if (ROLE_ADMIN.equals(normalized) || ROLE_OPERATOR.equals(normalized) || ROLE_CUSTOMER.equals(normalized)) {
+            return normalized;
+        }
+        throw new BusinessException("非法角色: " + role);
     }
 }

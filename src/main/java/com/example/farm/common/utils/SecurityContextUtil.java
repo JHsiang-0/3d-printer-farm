@@ -3,6 +3,7 @@ package com.example.farm.common.utils;
 import com.example.farm.common.exception.BusinessException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 /**
@@ -83,5 +84,26 @@ public class SecurityContextUtil {
     public static boolean isAuthenticated() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         return authentication != null && authentication.isAuthenticated();
+    }
+
+    /**
+     * 获取当前登录用户角色（去掉 ROLE_ 前缀）。
+     *
+     * @return 角色名，如 ADMIN / OPERATOR；获取失败返回 null
+     */
+    public static String getCurrentRole() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !authentication.isAuthenticated()) {
+            return null;
+        }
+        if (authentication.getAuthorities() == null || authentication.getAuthorities().isEmpty()) {
+            return null;
+        }
+        GrantedAuthority first = authentication.getAuthorities().iterator().next();
+        if (first == null || first.getAuthority() == null) {
+            return null;
+        }
+        String authority = first.getAuthority();
+        return authority.startsWith("ROLE_") ? authority.substring(5) : authority;
     }
 }

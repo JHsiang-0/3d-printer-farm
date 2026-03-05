@@ -48,6 +48,12 @@ public class RedisKeyConstant {
     public static final String LOGIN_FAIL_COUNT = "farm:login:fail:";
 
     /**
+     * 用户禁用标记
+     * farm:user:disabled:{userId}
+     */
+    public static final String USER_DISABLED = "farm:user:disabled:";
+
+    /**
      * 打印机历史状态（最近24小时）
      * farm:printer:history:{printerId}
      * Redis List 结构，过期时间：24小时

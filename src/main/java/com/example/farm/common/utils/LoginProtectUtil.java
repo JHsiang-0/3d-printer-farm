@@ -109,4 +109,28 @@ public class LoginProtectUtil {
             return 0;
         }
     }
+
+    /**
+     * 标记用户为禁用状态（长期生效，直到显式恢复）。
+     */
+    public void disableUser(Long userId) {
+        String key = RedisKeyConstant.getKey(RedisKeyConstant.USER_DISABLED, userId);
+        redisUtil.setString(key, "1");
+    }
+
+    /**
+     * 取消用户禁用状态。
+     */
+    public void enableUser(Long userId) {
+        String key = RedisKeyConstant.getKey(RedisKeyConstant.USER_DISABLED, userId);
+        redisUtil.delete(key);
+    }
+
+    /**
+     * 检查用户是否已被禁用。
+     */
+    public boolean isUserDisabled(Long userId) {
+        String key = RedisKeyConstant.getKey(RedisKeyConstant.USER_DISABLED, userId);
+        return redisUtil.hasKey(key);
+    }
 }

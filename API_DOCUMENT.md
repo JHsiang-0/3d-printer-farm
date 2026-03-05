@@ -1,60 +1,51 @@
-# 3D 打印机农场管理系统 - API 接口文档
+# 3D 农场管理系统 API 文档
 
 ## 基础信息
-
-- **基础 URL**: `http://localhost:8080`
-- **API 前缀**: `/api/v1`
-- **WebSocket**: `ws://localhost:8080/ws/farm-status`
-- **认证方式**: JWT Token (Header: `Authorization: Bearer {token}`)
+- Base URL: `http://localhost:8080`
+- API 前缀: `/api/v1`
+- 认证方式: `Authorization: Bearer <token>`
 
 ## 统一响应格式
-
 ```json
 {
   "code": 200,
   "message": "操作成功",
-  "data": {},
-  "timestamp": 1712345678901
+  "data": {}
 }
 ```
 
----
+## 1. 认证与用户（`/api/v1/auth`）
 
-## 一、用户认证接口
+### 1.1 登录
+- `POST /api/v1/auth/login`
+- 免认证
 
-**Base URL**: `/api/v1/auth`
-
-### 1.1 用户登录
-- **URL**: `POST /api/v1/auth/login`
-- **无需认证**: ✅
-- **请求体**:
+请求体：
 ```json
 {
   "username": "admin",
   "password": "Admin123"
 }
 ```
-- **响应**:
+
+响应 `data`：
 ```json
 {
-  "code": 200,
-  "message": "登录成功",
-  "data": {
-    "token": "eyJhbGciOiJIUzI1NiIs...",
-    "expiresIn": 604800,
-    "userId": 1,
-    "username": "admin",
-    "role": "ADMIN",
-    "email": "admin@example.com",
-    "phone": "13800138000"
-  }
+  "token": "eyJ...",
+  "expiresIn": 604800,
+  "userId": 1,
+  "username": "admin",
+  "role": "ADMIN",
+  "email": "admin@example.com",
+  "phone": "13800138000"
 }
 ```
 
-### 1.2 用户注册
-- **URL**: `POST /api/v1/auth/register`
-- **无需认证**: ✅
-- **请求体**:
+### 1.2 注册
+- `POST /api/v1/auth/register`
+- 免认证
+
+请求体：
 ```json
 {
   "username": "operator01",
@@ -65,9 +56,17 @@
 }
 ```
 
+校验规则：
+- `username`: 3-20 位，仅字母/数字/下划线
+- `password`: 6-20 位，必须包含大写字母+小写字母+数字
+- `confirmPassword`: 必填，且与 `password` 一致
+- `phone`: 中国大陆手机号格式
+
 ### 1.3 修改密码
-- **URL**: `POST /api/v1/auth/{userId}/change-password`
-- **请求体**:
+- `POST /api/v1/auth/{userId}/change-password`
+- 需认证，且 `userId` 必须是当前登录用户
+
+请求体：
 ```json
 {
   "oldPassword": "OldPass123",
@@ -76,299 +75,154 @@
 }
 ```
 
-### 1.4 获取当前用户信息
-- **URL**: `GET /api/v1/auth/{userId}/profile`
+### 1.4 获取个人信息
+- `GET /api/v1/auth/{userId}/profile`
+- 需认证，且 `userId` 必须是当前登录用户
 
-### 1.5 更新用户信息
-- **URL**: `PUT /api/v1/auth/{userId}/profile`
-- **请求体**:
+### 1.5 更新个人信息
+- `PUT /api/v1/auth/{userId}/profile`
+- 需认证，且 `userId` 必须是当前登录用户
+- 普通用户接口不允许修改 `role`
+
+请求体：
 ```json
 {
-  "id": 1,
   "email": "newemail@example.com",
-  "phone": "13900139000",
-  "role": "OPERATOR"
+  "phone": "13900139000"
 }
 ```
 
 ### 1.6 检查用户名是否可用
-- **URL**: `GET /api/v1/auth/check-username?username=operator01`
-- **无需认证**: ✅
+- `GET /api/v1/auth/check-username?username=operator01`
+- 免认证
 
 ### 1.7 检查邮箱是否可用
-- **URL**: `GET /api/v1/auth/check-email?email=test@example.com`
-- **无需认证**: ✅
+- `GET /api/v1/auth/check-email?email=test@example.com`
+- 免认证
 
 ---
 
-## 二、打印机管理接口
+## 2. 管理员用户接口（`/api/v1/auth/admin`）
+> 需要 `ADMIN` 角色
 
-**Base URL**: `/api/v1/printers`
+### 2.1 分页查询用户
+- `GET /api/v1/auth/admin/users?pageNum=1&pageSize=10`
 
-### 2.1 获取打印机分页列表
-- **URL**: `GET /api/v1/printers/page`
-- **参数**:
-  - `pageNum` (可选): 页码，默认 1
-  - `pageSize` (可选): 每页条数，默认 10
-  - `name` (可选): 打印机名称模糊查询
-  - `status` (可选): 状态筛选 (IDLE/PRINTING/OFFLINE/ERROR)
-- **响应**:
+### 2.2 更新用户
+- `PUT /api/v1/auth/admin/users/{userId}`
+
+请求体示例：
 ```json
 {
-  "code": 200,
-  "data": {
-    "records": [
-      {
-        "id": 1,
-        "name": "Voron-2.4-01",
-        "ipAddress": "192.168.1.101",
-        "macAddress": "AA:BB:CC:DD:EE:FF",
-        "firmwareType": "Klipper",
-        "status": "PRINTING",
-        "currentMaterial": "PLA",
-        "nozzleSize": 0.40,
-        "currentJobId": 5
-      }
-    ],
-    "total": 10,
-    "size": 10,
-    "current": 1,
-    "pages": 1
-  }
+  "email": "u@example.com",
+  "phone": "13800138000",
+  "role": "OPERATOR"
 }
 ```
 
-### 2.2 添加打印机
-- **URL**: `POST /api/v1/printers/add`
-- **请求体**:
-```json
-{
-  "name": "Voron-2.4-02",
-  "ipAddress": "192.168.1.102",
-  "macAddress": "AA:BB:CC:DD:EE:00",
-  "firmwareType": "Klipper",
-  "apiKey": "optional_api_key"
-}
-```
+### 2.3 禁用用户
+- `POST /api/v1/auth/admin/users/{userId}/disable`
+- 不需要传 `adminId`，后端从登录态获取
 
-### 2.3 修改打印机信息
-- **URL**: `PUT /api/v1/printers/update`
-- **请求体**:
-```json
-{
-  "id": 1,
-  "name": "Voron-2.4-01-New",
-  "ipAddress": "192.168.1.101",
-  "macAddress": "AA:BB:CC:DD:EE:FF",
-  "firmwareType": "Klipper",
-  "apiKey": "new_api_key"
-}
-```
+### 2.4 启用用户
+- `POST /api/v1/auth/admin/users/{userId}/enable`
+- 不需要传 `adminId`
 
-### 2.4 删除打印机
-- **URL**: `DELETE /api/v1/printers/delete/{id}`
+### 2.5 批量迁移明文密码
+- `POST /api/v1/auth/admin/migrate-passwords?adminSecret=...`
 
-### 2.5 扫描局域网打印机
-- **URL**: `GET /api/v1/printers/scan?subnet=192.168.1`
-- **响应**: `["192.168.1.101", "192.168.1.102"]`
-
-### 2.6 批量添加打印机
-- **URL**: `POST /api/v1/printers/batch-add`
-- **请求体**: `["192.168.1.101", "192.168.1.102"]`
+### 2.6 查询密码存储状态
+- `GET /api/v1/auth/admin/password-status?adminSecret=...`
 
 ---
 
-## 三、打印任务接口
+## 3. 打印任务（`/api/v1/print-jobs`）
 
-**Base URL**: `/api/v1/print-jobs`
+### 3.1 获取队列任务
+- `GET /api/v1/print-jobs/queue`
 
-### 3.1 获取排队中的任务
-- **URL**: `GET /api/v1/print-jobs/queue`
-- **响应**:
-```json
-{
-  "code": 200,
-  "data": [
-    {
-      "id": 1,
-      "fileId": 5,
-      "printerId": null,
-      "userId": 1,
-      "priority": 10,
-      "status": "QUEUED",
-      "progress": 0.00,
-      "materialType": "PLA",
-      "nozzleSize": 0.40
-    }
-  ]
-}
-```
+### 3.2 创建任务
+- 推荐：`POST /api/v1/print-jobs/create`
+- 兼容：`POST /api/v1/print-jobs`（同义）
 
-### 3.2 提交打印任务（简化版）
-- **URL**: `POST /api/v1/print-jobs/submit`
-- **参数**:
-  - `fileId` (必填): 文件ID
-  - `priority` (可选): 优先级，默认 0
-
-### 3.3 创建打印任务（完整版）
-- **URL**: `POST /api/v1/print-jobs`
-- **请求体**:
+请求体：
 ```json
 {
   "fileId": 5,
   "materialType": "PLA",
-  "nozzleSize": 0.40,
-  "priority": 5
+  "nozzleSize": 0.4,
+  "priority": 5,
+  "autoAssign": true
 }
 ```
 
-### 3.4 取消任务
-- **URL**: `DELETE /api/v1/print-jobs/{id}`
+### 3.3 取消任务
+- `DELETE /api/v1/print-jobs/{id}`
 
-### 3.5 手动指派任务给打印机
-- **URL**: `POST /api/v1/print-jobs/{jobId}/assign?printerId=1`
+### 3.4 手动派发任务
+- `POST /api/v1/print-jobs/{jobId}/assign?printerId=1`
 
 ---
 
-## 四、打印文件接口
+## 4. 打印文件（`/api/v1/print-files`）
 
-**Base URL**: `/api/v1/print-files`
+### 4.1 上传并解析 G-code
+- `POST /api/v1/print-files/upload`
+- `Content-Type: multipart/form-data`
+- 参数：`file`
 
-### 4.1 上传切片文件
-- **URL**: `POST /api/v1/print-files/upload`
-- **Content-Type**: `multipart/form-data`
-- **参数**:
-  - `file` (必填): G-code 文件
-- **响应**:
+### 4.2 分页查询文件
+- `POST /api/v1/print-files/page`
+
+请求体：
 ```json
 {
-  "code": 200,
-  "data": {
-    "id": 1,
-    "originalName": "cube.gcode",
-    "safeName": "1712345678901_cube.gcode",
-    "fileUrl": "http://127.0.0.1:9000/farm/1712345678901_cube.gcode",
-    "fileSize": 1024567,
-    "estTime": 3600,
-    "materialType": "PLA",
-    "nozzleSize": 0.40
-  }
+  "pageNum": 1,
+  "pageSize": 10
 }
 ```
 
-### 4.2 创建打印任务（从文件）
-- **URL**: `POST /api/v1/print-jobs/create`
-- **请求体**:
-```json
-{
-  "fileId": 1,
-  "materialType": "PLA",
-  "nozzleSize": 0.40,
-  "priority": 0
-}
-```
+### 4.3 删除文件
+- `DELETE /api/v1/print-files/{id}`
 
 ---
 
-## 五、打印机控制接口
+## 5. 打印机（`/api/v1/printers`）
 
-**Base URL**: `/api/v1/control`
+### 5.1 分页查询
+- `GET /api/v1/printers/page`
 
-### 5.1 紧急停止
-- **URL**: `POST /api/v1/control/{id}/emergency-stop`
+### 5.2 新增
+- `POST /api/v1/printers/add`
 
-### 5.2 暂停打印
-- **URL**: `POST /api/v1/control/{id}/pause`
+### 5.3 更新
+- `PUT /api/v1/printers/update`
 
----
+### 5.4 删除
+- `DELETE /api/v1/printers/delete/{id}`
 
-## 六、WebSocket 实时数据
+### 5.5 局域网扫描
+- `GET /api/v1/printers/scan?subnet=192.168.1`
 
-### 6.1 连接地址
-- **URL**: `ws://localhost:8080/ws/farm-status`
-- **无需认证**: ✅
-
-### 6.2 接收数据格式
-```json
-{
-  "printerId": 1,
-  "data": {
-    "nozzleTemp": 215.5,
-    "nozzleTarget": 210.0,
-    "bedTemp": 60.0,
-    "bedTarget": 60.0,
-    "progress": 45.67,
-    "state": "printing"
-  },
-  "timestamp": 1712345678901
-}
-```
-
-### 6.3 JavaScript 连接示例
-```javascript
-const ws = new WebSocket('ws://localhost:8080/ws/farm-status');
-
-ws.onopen = () => console.log('WebSocket 连接成功');
-
-ws.onmessage = (event) => {
-  const data = JSON.parse(event.data);
-  console.log('打印机状态:', data);
-};
-
-ws.onerror = (error) => console.error('WebSocket 错误:', error);
-ws.onclose = () => console.log('WebSocket 连接关闭');
-```
+### 5.6 批量新增
+- `POST /api/v1/printers/batch-add`
 
 ---
 
-## 七、管理员接口
-
-**Base URL**: `/api/v1/auth/admin`
-
-### 7.1 查询用户列表
-- **URL**: `GET /api/v1/auth/admin/users?pageNum=1&pageSize=10`
-
-### 7.2 更新用户信息
-- **URL**: `PUT /api/v1/auth/admin/users/{userId}`
-
-### 7.3 禁用用户
-- **URL**: `POST /api/v1/auth/admin/users/{userId}/disable?adminId=1`
-
-### 7.4 启用用户
-- **URL**: `POST /api/v1/auth/admin/users/{userId}/enable?adminId=1`
-
-### 7.5 批量迁移明文密码
-- **URL**: `POST /api/v1/auth/admin/migrate-passwords?adminSecret=FarmAdmin2024`
-
-### 7.6 检查密码存储状态
-- **URL**: `GET /api/v1/auth/admin/password-status?adminSecret=FarmAdmin2024`
+## 6. 打印控制（`/api/v1/control`）
+- `POST /api/v1/control/{id}/emergency-stop`
+- `POST /api/v1/control/{id}/pause`
 
 ---
 
-## 附录：状态枚举
+## 7. WebSocket
+- URL: `ws://localhost:8080/ws/farm-status`
+- 通道无需 token（按当前后端配置）
 
-### 打印机状态
-| 状态 | 说明 |
-|------|------|
-| IDLE | 空闲 |
-| PRINTING | 打印中 |
-| OFFLINE | 离线 |
-| ERROR | 错误 |
-| MAINTENANCE | 维护中 |
+---
 
-### 打印任务状态
-| 状态 | 说明 |
-|------|------|
-| QUEUED | 排队中 |
-| ASSIGNED | 已分配 |
-| PRINTING | 打印中 |
-| COMPLETED | 已完成 |
-| FAILED | 失败 |
-| CANCELED | 已取消 |
-
-### 用户角色
-| 角色 | 说明 |
-|------|------|
-| ADMIN | 管理员 |
-| OPERATOR | 操作员 |
-| CUSTOMER | 客户 |
+## 常见错误码说明
+- 参数校验失败：`code != 200`，`message` 含字段级错误（例如 `password:密码必须包含大小写字母和数字`）
+- 方法不支持：`message` 类似 `请求方法不支持，当前方法=POST，支持方法=DELETE`
+- 未登录/Token 失效：401
+- 用户被禁用：403
