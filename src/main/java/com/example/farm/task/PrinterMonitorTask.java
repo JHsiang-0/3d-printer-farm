@@ -19,6 +19,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
@@ -43,7 +44,19 @@ public class PrinterMonitorTask {
     @PreDestroy
     public void destroy() {
         LogUtil.shutdown("PrinterMonitorTask");
+        // 优雅关闭线程池：先停止接受新任务，然后等待现有任务完成
         executorService.shutdown();
+        try {
+            // 等待最多 5 秒让正在执行的任务完成
+            if (!executorService.awaitTermination(5, TimeUnit.SECONDS)) {
+                // 如果超时，强制关闭
+                executorService.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            // 如果被中断，强制关闭
+            executorService.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
     }
 
     /**
@@ -192,13 +205,24 @@ public class PrinterMonitorTask {
         printerCacheService.clearStatusCache(printer.getId());
     }
 
+    /**
+     * 根据统一状态确定数据库状态
+     * 注意：此处的 moonrakerState 已经是经过 calculateUnifiedState 处理后的统一状态
+     * 可能包含系统级状态：shutdown, startup, error, ready 以及任务级状态：printing, paused 等
+     */
     private String determineDbStatus(String moonrakerState) {
         if (moonrakerState == null) return "OFFLINE";
+
         return switch (moonrakerState.toLowerCase()) {
+            // 任务级状态
             case "printing", "paused" -> "PRINTING";
             case "standby", "complete" -> "IDLE";
-            case "error" -> "ERROR";
-            case "offline" -> "OFFLINE";
+            // 系统级状态 - 需要特殊处理
+            case "shutdown" -> "ERROR";  // 热失控等安全保护触发
+            case "startup" -> "OFFLINE"; // 启动中视为离线
+            case "error" -> "ERROR";     // 系统错误
+            case "ready" -> "IDLE";      // 就绪但无任务
+            case "offline", "unknown" -> "OFFLINE";
             default -> "IDLE";
         };
     }

@@ -40,7 +40,8 @@ public class MoonrakerApiClient {
     // ... 下面的所有业务方法 (getPrinterStatus, emergencyStop 等) 完全保持不变 ...
 
     public MoonrakerStatusDTO getPrinterStatus(String ipAddress) {
-        String url = String.format("http://%s:7125/printer/objects/query?extruder=temperature,target&heater_bed=temperature,target&display_status=progress&print_stats=state", ipAddress);
+        // 使用新的对象级查询 URL，获取更全面的打印机数据
+        String url = String.format("http://%s:7125/printer/objects/query?webhooks&print_stats&extruder&heater_bed&display_status", ipAddress);
 
         try {
             String jsonResponse = restClient.get()
@@ -54,17 +55,40 @@ public class MoonrakerApiClient {
                     JsonNode statusNode = rootNode.path("result").path("status");
                     MoonrakerStatusDTO dto = new MoonrakerStatusDTO();
 
+                    // ========== 解析 webhooks 节点 (系统级状态 - 最高优先级) ==========
+                    JsonNode webhooks = statusNode.path("webhooks");
+                    String webhooksState = getTextOrDefault(webhooks, "state", "unknown");
+                    String webhooksStateMessage = getTextOrDefault(webhooks, "state_message", null);
+                    dto.setSystemState(webhooksState);
+                    dto.setSystemMessage(webhooksStateMessage);
+
+                    // ========== 解析 print_stats 节点 (任务级状态) ==========
+                    JsonNode printStats = statusNode.path("print_stats");
+                    String printStatsState = getTextOrDefault(printStats, "state", "offline");
+                    dto.setFilename(getTextOrDefault(printStats, "filename", null));
+                    dto.setTotalDuration(getDoubleOrDefault(printStats, "total_duration", 0.0));
+                    dto.setPrintDuration(getDoubleOrDefault(printStats, "print_duration", 0.0));
+                    dto.setFilamentUsed(getDoubleOrDefault(printStats, "filament_used", 0.0));
+
+                    // ========== 状态降维融合：根据优先级计算统一状态 ==========
+                    String unifiedState = calculateUnifiedState(webhooksState, printStatsState);
+                    dto.setState(unifiedState);
+
+                    // ========== 解析 extruder 节点 ==========
                     JsonNode extruder = statusNode.path("extruder");
-                    dto.setNozzleTemp(extruder.path("temperature").asDouble(0.0));
-                    dto.setNozzleTarget(extruder.path("target").asDouble(0.0));
+                    dto.setToolTemperature(getDoubleOrDefault(extruder, "temperature", 0.0));
+                    dto.setToolTarget(getDoubleOrDefault(extruder, "target", 0.0));
 
+                    // ========== 解析 heater_bed 节点 ==========
                     JsonNode bed = statusNode.path("heater_bed");
-                    dto.setBedTemp(bed.path("temperature").asDouble(0.0));
-                    dto.setBedTarget(bed.path("target").asDouble(0.0));
+                    dto.setBedTemperature(getDoubleOrDefault(bed, "temperature", 0.0));
+                    dto.setBedTarget(getDoubleOrDefault(bed, "target", 0.0));
 
-                    double rawProgress = statusNode.path("display_status").path("progress").asDouble(0.0);
+                    // ========== 解析 display_status 节点 ==========
+                    JsonNode displayStatus = statusNode.path("display_status");
+                    double rawProgress = getDoubleOrDefault(displayStatus, "progress", 0.0);
+                    // 将 0-1 的进度转换为 0-100 的百分比，保留两位小数
                     dto.setProgress(Math.round(rawProgress * 10000.0) / 100.0);
-                    dto.setState(statusNode.path("print_stats").path("state").asText("offline"));
 
                     return dto;
                 }
@@ -73,6 +97,71 @@ public class MoonrakerApiClient {
             log.debug("打印机状态探测失败: 设备IP={}，可能是连接拒绝或超时", ipAddress);
         }
         return null;
+    }
+
+    /**
+     * 状态降维融合：根据 Klipper 状态字典优先级计算统一状态
+     *
+     * 【第一层：系统级状态 (webhooks.state) - 最高优先级】
+     * - "ready"：主板正常运行（只有在此状态下，才允许去读取第二层的任务状态）
+     * - "startup"：Klipper 服务正在启动中
+     * - "shutdown"：Klipper 触发了安全保护（如加热器异常、MCU 断开），强制急停
+     * - "error"：Klipper 遇到致命配置或连接错误
+     *
+     * 【第二层：任务级状态 (print_stats.state) - 业务优先级】
+     * - "standby"：打印机空闲，无任务
+     * - "printing"：正在执行打印任务
+     * - "paused"：打印已暂停
+     * - "complete"：打印任务顺利完成
+     * - "error" / "cancelled"：打印任务被取消或失败
+     *
+     * @param webhooksState 系统级状态
+     * @param printStatsState 任务级状态
+     * @return 统一状态（前端展示的唯一决定性状态）
+     */
+    private String calculateUnifiedState(String webhooksState, String printStatsState) {
+        // 防御性编程：处理 null 或空字符串
+        String normalizedWebhookState = (webhooksState == null || webhooksState.trim().isEmpty())
+                ? "unknown" : webhooksState.toLowerCase().trim();
+        String normalizedPrintStatsState = (printStatsState == null || printStatsState.trim().isEmpty())
+                ? "offline" : printStatsState.toLowerCase().trim();
+
+        // 优先拦截：如果 webhooks.state 是非 ready 状态，直接使用系统级状态
+        // 这包括：shutdown（热失控等安全保护）、error（配置错误）、startup（启动中）
+        if (!"ready".equals(normalizedWebhookState)) {
+            return normalizedWebhookState;
+        }
+
+        // 正常放行：只有当 webhooks.state = "ready" 时，才使用任务级状态
+        return normalizedPrintStatsState;
+    }
+
+    /**
+     * 安全获取 JsonNode 中的文本值，如果节点不存在或为 null，返回默认值
+     */
+    private String getTextOrDefault(JsonNode parentNode, String fieldName, String defaultValue) {
+        if (parentNode == null || parentNode.isMissingNode()) {
+            return defaultValue;
+        }
+        JsonNode fieldNode = parentNode.get(fieldName);
+        if (fieldNode == null || fieldNode.isNull()) {
+            return defaultValue;
+        }
+        return fieldNode.asText(defaultValue);
+    }
+
+    /**
+     * 安全获取 JsonNode 中的 double 值，如果节点不存在或为 null，返回默认值
+     */
+    private Double getDoubleOrDefault(JsonNode parentNode, String fieldName, Double defaultValue) {
+        if (parentNode == null || parentNode.isMissingNode()) {
+            return defaultValue;
+        }
+        JsonNode fieldNode = parentNode.get(fieldName);
+        if (fieldNode == null || fieldNode.isNull()) {
+            return defaultValue;
+        }
+        return fieldNode.asDouble(defaultValue);
     }
 
     // ... emergencyStop, pausePrint, uploadAndPrint 保持你原有的写法 ...

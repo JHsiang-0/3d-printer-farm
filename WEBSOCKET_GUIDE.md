@@ -64,19 +64,52 @@
 {
   "printerId": 1,
   "data": {
+    "systemState": "ready",
+    "systemMessage": "Printer is ready",
     "state": "printing",
-    "progress": 45.5,
     "filename": "model.gcode",
-    "printDuration": 3600,
-    "totalDuration": 8000,
+    "printDuration": 3600.0,
+    "totalDuration": 8000.0,
     "filamentUsed": 1250.5,
+    "progress": 45.5,
     "toolTemperature": 210.5,
+    "toolTarget": 210.0,
     "bedTemperature": 60.0,
-    "message": null
+    "bedTarget": 60.0
   },
   "timestamp": 1709712000000
 }
 ```
+
+**字段说明：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `systemState` | String | 系统状态：ready/startup/shutdown/error，反映 Klipper 主板底层状态 |
+| `systemMessage` | String | 系统状态消息，如 "Printer is ready" |
+| `state` | String | 打印任务状态：standby/printing/paused/complete/error/offline |
+| `filename` | String | 当前打印文件名，可能为 null |
+| `printDuration` | Double | 打印持续时间（秒） |
+| `totalDuration` | Double | 总持续时间（秒） |
+| `filamentUsed` | Double | 已用耗材长度（毫米） |
+| `progress` | Double | 打印进度（0.00 - 100.00） |
+| `toolTemperature` | Double | 喷头当前温度（°C） |
+| `toolTarget` | Double | 喷头目标温度（°C） |
+| `bedTemperature` | Double | 热床当前温度（°C） |
+| `bedTarget` | Double | 热床目标温度（°C） |
+
+**状态说明：**
+- `systemState` (webhooks.state): 反映主板底层状态
+  - `ready`: 主板正常就绪
+  - `startup`: 正在启动
+  - `shutdown`: 已关闭
+  - `error`: 主板报错
+- `state` (print_stats.state): 反映打印任务状态
+  - `standby`: 待机
+  - `printing`: 打印中
+  - `paused`: 暂停
+  - `complete`: 完成
+  - `error`: 错误
 
 ## 前端接入方式
 

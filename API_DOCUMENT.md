@@ -464,9 +464,144 @@
 
 ---
 
-## 7. WebSocket
-- URL: `ws://localhost:8080/ws/farm-status`
-- 通道无需 token（按当前后端配置）
+## 7. WebSocket 实时状态推送
+
+### 7.1 连接信息
+- **URL**: `ws://localhost:8080/ws/farm-status`
+- **认证**: 无需 Token（按当前后端配置）
+
+### 7.2 消息格式
+
+WebSocket 推送的消息包含以下字段：
+
+```json
+{
+  "printerId": 1,
+  "data": {
+    "systemState": "ready",
+    "systemMessage": "Printer is ready",
+    "state": "printing",
+    "filename": "model.gcode",
+    "printDuration": 3600.0,
+    "totalDuration": 8000.0,
+    "filamentUsed": 1250.5,
+    "progress": 45.5,
+    "toolTemperature": 210.5,
+    "toolTarget": 210.0,
+    "bedTemperature": 60.0,
+    "bedTarget": 60.0
+  },
+  "timestamp": 1709712000000
+}
+```
+
+### 7.3 字段说明
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `printerId` | Long | 打印机 ID |
+| `data.systemState` | String | 系统状态：ready/startup/shutdown/error，用于判断底层主板状态 |
+| `data.systemMessage` | String | 系统状态消息，如 "Printer is ready" |
+| `data.state` | String | 打印任务状态：standby/printing/paused/complete/error/offline |
+| `data.unifiedState` | String | **【推荐】统一状态**：融合 systemState 和 state 的最终状态，前端优先使用此字段 |
+| `data.filename` | String | 当前打印文件名，可能为 null |
+| `data.printDuration` | Double | 打印持续时间（秒） |
+| `data.totalDuration` | Double | 总持续时间（秒） |
+| `data.filamentUsed` | Double | 已用耗材长度（毫米） |
+| `data.progress` | Double | 打印进度（0.00 - 100.00） |
+| `data.toolTemperature` | Double | 喷头当前温度（°C） |
+| `data.toolTarget` | Double | 喷头目标温度（°C） |
+| `data.bedTemperature` | Double | 热床当前温度（°C） |
+| `data.bedTarget` | Double | 热床目标温度（°C） |
+| `timestamp` | Long | 消息推送时间戳（毫秒） |
+
+### 7.4 统一状态机（Unified State Machine）⭐
+
+**推荐使用 `unifiedState` 字段**，它是将 `systemState`（系统层）和 `state`（业务层）按照严格优先级融合后的最终状态。
+
+#### 状态优先级与定义
+
+**第一层：系统最高优先级拦截（优先判断 systemState）**
+
+| unifiedState | 触发条件 | 定义说明 |
+|--------------|----------|----------|
+| `FAULT` | systemState = "shutdown" | 🔴 **硬件物理故障**：底层硬件故障或热失控急停，必须人工介入物理干预 |
+| `SYS_ERROR` | systemState = "error" | 🟠 **系统软件错误**：Klipper 系统软件级配置错误或通讯错误 |
+| `STARTING` | systemState = "startup" | 🟡 **启动中**：主板正在启动中，请稍后 |
+| *(放行)* | systemState = "ready" | 系统正常，进入第二层业务状态判断 |
+
+**第二层：业务状态判断（当 systemState 为 ready 时）**
+
+| unifiedState | 触发条件 | 定义说明 |
+|--------------|----------|----------|
+| `STANDBY` | state = "standby" | 🟢 **待机就绪**：打印机已准备就绪，即将开始或正在等待打印任务 |
+| `PRINTING` | state = "printing" | 🔵 **打印中**：当前正在执行打印作业 |
+| `PAUSED` | state = "paused" | ⏸️ **已暂停**：当前打印作业已暂停 |
+| `COMPLETED` | state = "complete" | ✅ **已完成**：最后一项打印任务已成功完成 |
+| `PRINT_ERROR` | state = "error" | ❌ **打印错误**：最后一次打印作业出错并退出，如 G-code 解析失败 |
+| `CANCELLED` | state = "cancelled" | 🚫 **已取消**：用户主动取消了最后一个打印作业 |
+| `UNKNOWN` | 其他未知状态 | ⚪ **未知状态**：系统无法识别的状态 |
+
+#### 状态流转图
+
+```
+                    ┌─────────────┐
+                    │   STARTING  │ ← systemState = "startup"
+                    │   (启动中)   │
+                    └──────┬──────┘
+                           │ 启动完成
+                           ▼
+┌─────────┐    ┌─────────────────────────┐
+│  FAULT  │    │      READY (系统就绪)    │
+│ (故障)   │◄───┤  systemState = "ready"   │
+└─────────┘    └───────────┬─────────────┘
+    ▲                      │
+    │ shutdown             │ 根据 print_stats.state
+    │                      ▼
+┌───┴────┐    ┌─────────┬─────────┬─────────┬──────────┬───────────┐
+│SYS_ERROR│   │ STANDBY │PRINTING │ PAUSED  │COMPLETED │PRINT_ERROR│
+│(系统错误)│   │ (待机)   │(打印中)  │ (暂停)   │ (已完成)  │ (打印错误) │
+└─────────┘   └─────────┴─────────┴─────────┴──────────┴───────────┘
+    ▲                                              │
+    │ systemState = "error"                        │ state = "error"
+    │                                              │
+    └──────────────────────────────────────────────┘
+```
+
+#### 前端使用建议
+
+1. **优先使用 `unifiedState`**：不再需要在前端处理 `systemState` 和 `state` 的优先级逻辑
+2. **状态显示优先级**：
+   - 红色告警：`FAULT` > `SYS_ERROR` > `PRINT_ERROR`
+   - 黄色警告：`STARTING` > `PAUSED` > `CANCELLED`
+   - 正常状态：`PRINTING` > `STANDBY` > `COMPLETED`
+3. **操作建议**：
+   - `FAULT` / `SYS_ERROR`：显示紧急处理按钮，建议联系管理员
+   - `PRINT_ERROR`：显示重试/取消按钮
+   - `COMPLETED` / `CANCELLED`：显示清理/开始新任务按钮
+
+### 7.5 原始状态映射关系（供参考）
+
+**系统状态 (systemState)** 与 **打印状态 (state)** 的原始定义：
+- `systemState`: 反映 Klipper 主板底层状态（webhooks.state）
+  - `ready`: 主板正常就绪
+  - `startup`: 正在启动
+  - `shutdown`: 已关闭
+  - `error`: 主板报错
+
+- `state`: 反映当前打印任务状态（print_stats.state）
+  - `standby`: 待机
+  - `printing`: 打印中
+  - `paused`: 暂停
+  - `complete`: 完成
+  - `error`: 错误
+  - `cancelled`: 已取消
+
+> **注意**：前端开发请直接使用 `unifiedState`，无需关心原始状态的映射逻辑。
+
+### 7.6 前端接入示例
+
+详见 [WEBSOCKET_GUIDE.md](./WEBSOCKET_GUIDE.md)
 
 ---
 
