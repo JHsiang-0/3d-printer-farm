@@ -3,6 +3,7 @@ package com.example.farm.common.exception;
 import com.example.farm.common.api.Result;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.catalina.connector.ClientAbortException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -48,6 +49,19 @@ public class GlobalExceptionHandler {
         log.warn("请求方法不支持: method={}, uri={}, supported={}, detail={}",
                 e.getMethod(), request.getRequestURI(), supported, e.getMessage());
         return Result.failed("请求方法不支持，当前方法=" + e.getMethod() + "，支持方法=" + supported);
+    }
+
+    /**
+     * 处理客户端中止连接异常（如用户刷新页面、关闭浏览器等）
+     * 这是正常的网络行为，不需要记录为错误
+     */
+    @ExceptionHandler(ClientAbortException.class)
+    public void handleClientAbortException(ClientAbortException e, HttpServletRequest request) {
+        // 客户端主动断开连接，属于正常现象，仅记录 debug 日志
+        if (log.isDebugEnabled()) {
+            log.debug("客户端中止连接: uri={}, message={}", request.getRequestURI(), e.getMessage());
+        }
+        // 不需要返回任何内容，因为客户端已经断开
     }
 
     @ExceptionHandler(Exception.class)
