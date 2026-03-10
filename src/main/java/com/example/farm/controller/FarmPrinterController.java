@@ -39,6 +39,7 @@ public class FarmPrinterController {
      * @param queryDTO 查询条件（页码、页大小、名称、状态）
      * @return 打印机分页结果
      */
+    @Operation(summary = "分页查询打印机列表", description = "支持按名称和状态筛选的分页查询")
     @GetMapping("/page")
     public Result<Page<FarmPrinter>> getPrinterPage(FarmPrinterQueryDTO queryDTO) {
         return Result.success(printerService.pagePrinters(queryDTO));
@@ -57,6 +58,7 @@ public class FarmPrinterController {
      * @return 新增/更新结果
      * @throws BusinessException 当 IP 为空或处理失败时抛出
      */
+    @Operation(summary = "新增打印机", description = "基于 MAC 地址的 Upsert 机制，解决 DHCP 动态分配导致的设备重复录入问题")
     @PostMapping("/add")
     public Result<String> addPrinter(@RequestBody FarmPrinterAddDTO addDTO) {
         if (!StringUtils.hasText(addDTO.getIpAddress())) {
@@ -76,6 +78,7 @@ public class FarmPrinterController {
      * @return 更新结果
      * @throws BusinessException 当设备 ID 为空或设备不存在时抛出
      */
+    @Operation(summary = "更新打印机信息", description = "修改打印机的名称、IP、MAC、耗材等配置信息")
     @PutMapping("/update")
     public Result<String> updatePrinter(@RequestBody FarmPrinterUpdateDTO updateDTO) {
         if (updateDTO.getId() == null) {
@@ -92,6 +95,7 @@ public class FarmPrinterController {
      * @return 删除结果
      * @throws BusinessException 当打印机不存在或处于打印中时抛出
      */
+    @Operation(summary = "删除打印机", description = "删除指定的打印机，打印中的设备无法删除")
     @DeleteMapping("/delete/{id}")
     public Result<String> deletePrinter(@PathVariable Long id) {
         printerService.deletePrinter(id);
@@ -111,6 +115,7 @@ public class FarmPrinterController {
      * @return 扫描结果列表（包含 IP、MAC、是否为新设备等）
      * @throws BusinessException 当 subnet 为空时抛出
      */
+    @Operation(summary = "扫描局域网打印机", description = "扫描指定网段中的 Klipper 设备，返回带 MAC 地址的详细信息")
     @GetMapping("/scan")
     public Result<List<PrinterScanResultDTO>> scanDevices(@RequestParam String subnet) {
         if (!StringUtils.hasText(subnet)) {
@@ -130,24 +135,6 @@ public class FarmPrinterController {
         return Result.success(results, message);
     }
 
-    /**
-     * 【兼容旧版】扫描指定网段中的新 Klipper 设备（仅返回 IP 列表）
-     * <p>用于向后兼容旧版客户端</p>
-     *
-     * @param subnet 网段前缀，例如 `192.168.1`
-     * @return 新发现设备 IP 列表
-     * @deprecated 请使用 {@link #scanDevices(String)} 替代
-     */
-    @GetMapping("/scan-legacy")
-    @Deprecated
-    public Result<List<String>> scanDevicesLegacy(@RequestParam String subnet) {
-        if (!StringUtils.hasText(subnet)) {
-            throw new BusinessException("必须提供网段前缀，例如 192.168.1");
-        }
-
-        List<String> discoveredIps = printerService.scanNewKlipperDevices(subnet);
-        return Result.success(discoveredIps, "扫描完成，发现 " + discoveredIps.size() + " 台新设备");
-    }
 
     /**
      * 【重构核心】批量新增/更新打印机（基于 MAC 地址的 Upsert 机制）
@@ -163,6 +150,7 @@ public class FarmPrinterController {
      * @return 批量操作结果统计
      * @throws BusinessException 当列表为空时抛出
      */
+    @Operation(summary = "批量添加打印机", description = "基于 MAC 地址的 Upsert 机制，批量录入扫描到的设备")
     @PostMapping("/batch-add")
     public Result<FarmPrinterService.BatchUpsertResult> batchAdd(
             @RequestBody List<PrinterScanResultDTO> scanResults) {
@@ -175,23 +163,6 @@ public class FarmPrinterController {
         return Result.success(result, result.getMessage());
     }
 
-    /**
-     * 【兼容旧版】批量新增打印机（直接使用 IP 列表）
-     * <p>不检查 MAC 地址，直接按 IP 添加。建议迁移到新的 batch-add 接口</p>
-     *
-     * @param ips 打印机 IP 列表
-     * @return 批量录入结果
-     * @deprecated 请使用 {@link #batchAdd(List)} 替代
-     */
-    @PostMapping("/batch-add-legacy")
-    @Deprecated
-    public Result<String> batchAddLegacy(@RequestBody List<String> ips) {
-        if (ips == null || ips.isEmpty()) {
-            throw new BusinessException("IP 列表不能为空");
-        }
-        printerService.batchAddPrinters(ips);
-        return Result.success(null, "成功批量录入 " + ips.size() + " 台设备");
-    }
 
     /**
      * 根据 MAC 地址查询打印机
@@ -199,6 +170,7 @@ public class FarmPrinterController {
      * @param macAddress MAC 地址
      * @return 打印机信息
      */
+    @Operation(summary = "根据 MAC 地址查询打印机", description = "通过 MAC 地址精确查询打印机信息")
     @GetMapping("/by-mac/{macAddress}")
     public Result<FarmPrinter> getByMacAddress(@PathVariable String macAddress) {
         if (!StringUtils.hasText(macAddress)) {
@@ -217,6 +189,7 @@ public class FarmPrinterController {
      * @param ipAddress IP 地址
      * @return 打印机信息
      */
+    @Operation(summary = "根据 IP 地址查询打印机", description = "通过 IP 地址精确查询打印机信息")
     @GetMapping("/by-ip/{ipAddress}")
     public Result<FarmPrinter> getByIpAddress(@PathVariable String ipAddress) {
         if (!StringUtils.hasText(ipAddress)) {

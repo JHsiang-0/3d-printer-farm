@@ -44,7 +44,7 @@ public class FarmPrintJobController {
      * @throws BusinessException 当参数非法或关联文件不存在时抛出
      */
     @Operation(summary = "创建打印任务")
-    @PostMapping({"", "/", "/create", "/create/"})
+    @PostMapping("")
     public Result<Long> createJob(@RequestBody FarmPrintJobCreateDTO req) {
         Long jobId = farmPrintJobService.createJob(req);
         log.info("创建打印任务请求完成: jobId={}, autoAssign={}", jobId, req.getAutoAssign());

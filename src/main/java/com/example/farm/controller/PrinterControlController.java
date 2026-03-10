@@ -5,6 +5,8 @@ import com.example.farm.common.exception.BusinessException;
 import com.example.farm.common.utils.MoonrakerApiClient;
 import com.example.farm.entity.FarmPrinter;
 import com.example.farm.service.FarmPrinterService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
@@ -16,6 +18,7 @@ import org.springframework.web.bind.annotation.*;
 @Slf4j
 @RequestMapping("/api/v1/control")
 @RequiredArgsConstructor
+@Tag(name = "打印机控制", description = "打印机硬件控制相关接口")
 public class PrinterControlController {
 
     private final FarmPrinterService printerService;
@@ -29,6 +32,7 @@ public class PrinterControlController {
      * @throws BusinessException 当打印机不存在时抛出
      */
     @PostMapping("/{id}/emergency-stop")
+    @Operation(summary = "发送急停指令", description = "向指定的打印机发送紧急停止命令")
     public Result<String> emergencyStop(@PathVariable Long id) {
         FarmPrinter printer = printerService.getById(id);
         if (printer == null) {
@@ -53,6 +57,7 @@ public class PrinterControlController {
      * @return 暂停执行结果
      * @throws BusinessException 当打印机不存在或暂停指令发送失败时抛出
      */
+    @Operation(summary = "暂停打印", description = "向指定的打印机发送暂停打印命令")
     @PostMapping("/{id}/pause")
     public Result<String> pausePrint(@PathVariable Long id) {
         FarmPrinter printer = printerService.getById(id);
