@@ -1,7 +1,7 @@
 package com.example.farm.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-import com.example.farm.entity.FarmPrinter;
+import com.example.farm.entity.Printer;
 import com.example.farm.entity.vo.PrinterVO;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -17,7 +17,7 @@ import java.util.List;
  * @since 2026-03-01
  */
 @Mapper
-public interface FarmPrinterMapper extends BaseMapper<FarmPrinter> {
+public interface PrinterMapper extends BaseMapper<Printer> {
 
     /**
      * 根据 MAC 地址查询打印机
@@ -25,7 +25,7 @@ public interface FarmPrinterMapper extends BaseMapper<FarmPrinter> {
      * @param macAddress MAC 地址
      * @return 打印机实体
      */
-    FarmPrinter selectByMacAddress(@Param("macAddress") String macAddress);
+    Printer selectByMacAddress(@Param("macAddress") String macAddress);
 
     /**
      * 根据 IP 地址查询打印机
@@ -33,7 +33,7 @@ public interface FarmPrinterMapper extends BaseMapper<FarmPrinter> {
      * @param ipAddress IP 地址
      * @return 打印机实体
      */
-    FarmPrinter selectByIpAddress(@Param("ipAddress") String ipAddress);
+    Printer selectByIpAddress(@Param("ipAddress") String ipAddress);
 
     /**
      * 释放被占用的 IP 地址
@@ -52,7 +52,7 @@ public interface FarmPrinterMapper extends BaseMapper<FarmPrinter> {
      * @param printer 打印机实体
      * @return 影响的行数
      */
-    int upsertByMacAddress(FarmPrinter printer);
+    int upsertByMacAddress(Printer printer);
 
     /**
      * 批量 Upsert 操作
@@ -60,7 +60,7 @@ public interface FarmPrinterMapper extends BaseMapper<FarmPrinter> {
      * @param printers 打印机列表
      * @return 影响的行数
      */
-    int batchUpsert(@Param("list") List<FarmPrinter> printers);
+    int batchUpsert(@Param("list") List<Printer> printers);
 
     /**
      * 根据 MAC 地址更新 IP 和状态

@@ -3,13 +3,13 @@ package com.example.farm.service;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.example.farm.common.exception.BusinessException;
-import com.example.farm.entity.FarmUser;
+import com.example.farm.entity.User;
 import com.example.farm.entity.dto.*;
 
 /**
  * 用户服务接口。
  */
-public interface FarmUserService extends IService<FarmUser> {
+public interface UserService extends IService<User> {
 
     /**
      * 用户登录。
@@ -53,7 +53,7 @@ public interface FarmUserService extends IService<FarmUser> {
      * @return 用户信息（已脱敏）
      * @throws BusinessException 当用户不存在时抛出
      */
-    FarmUser getCurrentUser(Long userId);
+    User getCurrentUser(Long userId);
 
     /**
      * 分页查询用户。
@@ -61,7 +61,7 @@ public interface FarmUserService extends IService<FarmUser> {
      * @param queryDTO 查询参数
      * @return 用户分页结果
      */
-    IPage<FarmUser> pageUsers(UserQueryDTO queryDTO);
+    IPage<User> pageUsers(UserQueryDTO queryDTO);
 
     /**
      * 禁用用户。

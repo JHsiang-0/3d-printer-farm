@@ -5,15 +5,15 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.example.farm.common.exception.BusinessException;
 import com.example.farm.common.utils.MacAddressUtil;
-import com.example.farm.entity.FarmPrinter;
-import com.example.farm.entity.dto.FarmPrinterAddDTO;
-import com.example.farm.entity.dto.FarmPrinterQueryDTO;
-import com.example.farm.entity.dto.FarmPrinterUpdateDTO;
+import com.example.farm.entity.Printer;
+import com.example.farm.entity.dto.PrinterAddDTO;
+import com.example.farm.entity.dto.PrinterQueryDTO;
+import com.example.farm.entity.dto.PrinterUpdateDTO;
 import com.example.farm.entity.dto.PrinterPositionUpdateDTO;
 import com.example.farm.entity.dto.PrinterScanResultDTO;
 import com.example.farm.entity.vo.PrinterVO;
-import com.example.farm.mapper.FarmPrinterMapper;
-import com.example.farm.service.FarmPrinterService;
+import com.example.farm.mapper.PrinterMapper;
+import com.example.farm.service.PrinterService;
 import com.example.farm.service.PrinterCacheService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -41,7 +41,7 @@ import java.util.stream.Collectors;
 @Service
 @Slf4j
 @RequiredArgsConstructor
-public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmPrinter> implements FarmPrinterService {
+public class PrinterServiceImpl extends ServiceImpl<PrinterMapper, Printer> implements PrinterService {
 
     private final PrinterCacheService printerCacheService;
     private final MacAddressUtil macAddressUtil;
@@ -49,13 +49,13 @@ public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmP
     // ==================== 基础 CRUD 操作 ====================
 
     @Override
-    public Page<FarmPrinter> pagePrinters(FarmPrinterQueryDTO queryDTO) {
-        Page<FarmPrinter> page = new Page<>(queryDTO.getPageNum(), queryDTO.getPageSize());
-        LambdaQueryWrapper<FarmPrinter> wrapper = new LambdaQueryWrapper<>();
+    public Page<Printer> pagePrinters(PrinterQueryDTO queryDTO) {
+        Page<Printer> page = new Page<>(queryDTO.getPageNum(), queryDTO.getPageSize());
+        LambdaQueryWrapper<Printer> wrapper = new LambdaQueryWrapper<>();
 
-        wrapper.like(StringUtils.hasText(queryDTO.getName()), FarmPrinter::getName, queryDTO.getName());
-        wrapper.eq(StringUtils.hasText(queryDTO.getStatus()), FarmPrinter::getStatus, queryDTO.getStatus());
-        wrapper.orderByDesc(FarmPrinter::getCreatedAt);
+        wrapper.like(StringUtils.hasText(queryDTO.getName()), Printer::getName, queryDTO.getName());
+        wrapper.eq(StringUtils.hasText(queryDTO.getStatus()), Printer::getStatus, queryDTO.getStatus());
+        wrapper.orderByDesc(Printer::getCreatedAt);
 
         return this.page(page, wrapper);
     }
@@ -71,7 +71,7 @@ public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmP
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void addPrinter(FarmPrinterAddDTO dto) {
+    public void addPrinter(PrinterAddDTO dto) {
         // 参数校验
         if (!StringUtils.hasText(dto.getIpAddress())) {
             throw new BusinessException("IP 地址不能为空");
@@ -104,11 +104,11 @@ public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmP
     /**
      * 基于 MAC 地址的 Upsert 核心逻辑
      */
-    private void upsertPrinterByMac(FarmPrinterAddDTO dto, String macAddress) {
+    private void upsertPrinterByMac(PrinterAddDTO dto, String macAddress) {
         String ipAddress = dto.getIpAddress();
 
         // 查询是否已存在该 MAC 地址的设备
-        FarmPrinter existingPrinter = baseMapper.selectByMacAddress(macAddress);
+        Printer existingPrinter = baseMapper.selectByMacAddress(macAddress);
 
         if (existingPrinter != null) {
             // ========== MAC 已存在：更新现有设备 ==========
@@ -149,7 +149,7 @@ public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmP
             releaseIpIfOccupied(ipAddress, macAddress);
 
             // 创建新设备
-            FarmPrinter newPrinter = new FarmPrinter();
+            Printer newPrinter = new Printer();
             newPrinter.setName(StringUtils.hasText(dto.getName())
                     ? dto.getName()
                     : macAddressUtil.generateDefaultPrinterName(macAddress));
@@ -184,17 +184,17 @@ public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmP
     /**
      * 无 MAC 地址时的降级处理（兼容旧逻辑）
      */
-    private void fallbackAddWithoutMac(FarmPrinterAddDTO dto) {
+    private void fallbackAddWithoutMac(PrinterAddDTO dto) {
         log.warn("无法获取设备 MAC 地址，使用 IP 作为唯一标识进行添加: IP={}", dto.getIpAddress());
 
         // 检查 IP 是否已存在
-        long count = this.count(new LambdaQueryWrapper<FarmPrinter>()
-                .eq(FarmPrinter::getIpAddress, dto.getIpAddress()));
+        long count = this.count(new LambdaQueryWrapper<Printer>()
+                .eq(Printer::getIpAddress, dto.getIpAddress()));
         if (count > 0) {
             throw new BusinessException("该 IP 地址的打印机已存在！");
         }
 
-        FarmPrinter printer = new FarmPrinter();
+        Printer printer = new Printer();
         printer.setName(dto.getName());
         printer.setIpAddress(dto.getIpAddress());
         printer.setFirmwareType(dto.getFirmwareType());
@@ -209,8 +209,8 @@ public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmP
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void updatePrinter(FarmPrinterUpdateDTO dto) {
-        FarmPrinter existingPrinter = this.getById(dto.getId());
+    public void updatePrinter(PrinterUpdateDTO dto) {
+        Printer existingPrinter = this.getById(dto.getId());
         if (existingPrinter == null) {
             log.warn("更新打印机失败：打印机不存在，id={}", dto.getId());
             throw new BusinessException("该打印机不存在！");
@@ -249,7 +249,7 @@ public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmP
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void deletePrinter(Long id) {
-        FarmPrinter printer = this.getById(id);
+        Printer printer = this.getById(id);
         if (printer == null) {
             log.warn("删除打印机失败：打印机不存在，id={}", id);
             throw new BusinessException("打印机不存在或已被删除！");
@@ -283,7 +283,7 @@ public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmP
 
         // 获取数据库中所有已存在的 MAC 地址（用于判断新旧设备）
         Set<String> existingMacs = this.list().stream()
-                .map(FarmPrinter::getMacAddress)
+                .map(Printer::getMacAddress)
                 .filter(StringUtils::hasText)
                 .map(mac -> macAddressUtil.normalizeMacAddress(mac))
                 .collect(Collectors.toSet());
@@ -366,18 +366,6 @@ public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmP
         }
     }
 
-    /**
-     * 【兼容旧版】仅返回新设备的 IP 列表
-     */
-    @Override
-    @Deprecated
-    public List<String> scanNewKlipperDevices(String subnet) {
-        List<PrinterScanResultDTO> allResults = scanKlipperDevices(subnet);
-        return allResults.stream()
-                .filter(PrinterScanResultDTO::getIsNewDevice)
-                .map(PrinterScanResultDTO::getIpAddress)
-                .collect(Collectors.toList());
-    }
 
     /**
      * 【重构核心】批量新增/更新打印机（基于 MAC 地址的 Upsert 机制）
@@ -451,12 +439,12 @@ public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmP
         // 步骤 2: 基于 MAC 的 Upsert
         if (StringUtils.hasText(macAddress)) {
             // 有 MAC 地址，执行真正的 Upsert
-            FarmPrinter printer = buildPrinterFromScanResult(result);
+            Printer printer = buildPrinterFromScanResult(result);
             baseMapper.upsertByMacAddress(printer);
         } else {
             // 无 MAC 地址，降级为普通插入
             log.warn("设备无 MAC 地址，降级处理: IP={}", ipAddress);
-            FarmPrinter printer = buildPrinterFromScanResult(result);
+            Printer printer = buildPrinterFromScanResult(result);
             printer.setMacAddress(null);
             this.save(printer);
         }
@@ -465,8 +453,8 @@ public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmP
     /**
      * 从扫描结果构建设备实体
      */
-    private FarmPrinter buildPrinterFromScanResult(PrinterScanResultDTO result) {
-        FarmPrinter printer = new FarmPrinter();
+    private Printer buildPrinterFromScanResult(PrinterScanResultDTO result) {
+        Printer printer = new Printer();
 
         // 名称优先使用建议名称，否则自动生成
         String name = StringUtils.hasText(result.getSuggestedName())
@@ -488,49 +476,11 @@ public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmP
         return printer;
     }
 
-    /**
-     * 【兼容旧版】批量新增打印机（不检查 MAC）
-     */
-    @Override
-    @Deprecated
-    public void batchAddPrinters(List<String> ipList) {
-        if (ipList == null || ipList.isEmpty()) {
-            log.warn("批量新增打印机跳过：IP 列表为空");
-            return;
-        }
-
-        List<FarmPrinter> newPrinters = new ArrayList<>();
-        for (String ip : ipList) {
-            // 尝试获取 MAC 地址
-            String mac = macAddressUtil.getMacAddress(ip);
-
-            FarmPrinter printer = new FarmPrinter();
-            printer.setName(StringUtils.hasText(mac)
-                    ? macAddressUtil.generateDefaultPrinterName(mac)
-                    : "Klipper-" + ip);
-            printer.setIpAddress(ip);
-            printer.setMacAddress(macAddressUtil.normalizeMacAddress(mac));
-            printer.setFirmwareType("Klipper");
-            printer.setStatus("OFFLINE");
-            printer.setCurrentMaterial("ABS");
-            printer.setNozzleSize(new BigDecimal("1.20"));
-            printer.setCreatedAt(LocalDateTime.now());
-            printer.setUpdatedAt(LocalDateTime.now());
-
-            newPrinters.add(printer);
-        }
-
-        // 使用 MyBatis Plus 的 saveBatch
-        this.saveBatch(newPrinters);
-        log.info("批量新增打印机成功：共 {} 台", newPrinters.size());
-
-        printerCacheService.refreshPrinterCache();
-    }
 
     // ==================== 辅助查询方法 ====================
 
     @Override
-    public FarmPrinter getByMacAddress(String macAddress) {
+    public Printer getByMacAddress(String macAddress) {
         if (!StringUtils.hasText(macAddress)) {
             return null;
         }
@@ -539,7 +489,7 @@ public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmP
     }
 
     @Override
-    public FarmPrinter getByIpAddress(String ipAddress) {
+    public Printer getByIpAddress(String ipAddress) {
         if (!StringUtils.hasText(ipAddress)) {
             return null;
         }
@@ -565,7 +515,7 @@ public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmP
      */
     private boolean releaseIpIfOccupied(String ipAddress, String excludeMac) {
         // 查询占用该 IP 的其他设备
-        FarmPrinter occupiedPrinter = baseMapper.selectByIpAddress(ipAddress);
+        Printer occupiedPrinter = baseMapper.selectByIpAddress(ipAddress);
 
         if (occupiedPrinter != null) {
             String occupiedMac = occupiedPrinter.getMacAddress();
@@ -646,7 +596,7 @@ public class FarmPrinterServiceImpl extends ServiceImpl<FarmPrinterMapper, FarmP
                 }
 
                 // 检查设备是否存在
-                FarmPrinter printer = this.getById(update.getId());
+                Printer printer = this.getById(update.getId());
                 if (printer == null) {
                     log.warn("更新位置失败：打印机不存在，id={}", update.getId());
                     failCount++;

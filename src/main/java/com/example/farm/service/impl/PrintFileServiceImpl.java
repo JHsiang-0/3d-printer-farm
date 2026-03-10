@@ -7,10 +7,10 @@ import com.example.farm.common.exception.BusinessException;
 import com.example.farm.common.utils.GCodeParser;
 import com.example.farm.common.utils.RustFsClient;
 import com.example.farm.common.utils.SecurityContextUtil;
-import com.example.farm.entity.FarmPrintFile;
-import com.example.farm.entity.dto.FarmPrintFileQueryDTO;
-import com.example.farm.mapper.FarmPrintFileMapper;
-import com.example.farm.service.FarmPrintFileService;
+import com.example.farm.entity.PrintFile;
+import com.example.farm.entity.dto.PrintFileQueryDTO;
+import com.example.farm.mapper.PrintFileMapper;
+import com.example.farm.service.PrintFileService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -27,7 +27,7 @@ import java.time.LocalDateTime;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class FarmPrintFileServiceImpl extends ServiceImpl<FarmPrintFileMapper, FarmPrintFile> implements FarmPrintFileService {
+public class PrintFileServiceImpl extends ServiceImpl<PrintFileMapper, PrintFile> implements PrintFileService {
 
     private static final int META_SAMPLE_SIZE = 8192;
     private static final int DEEP_TAIL_SAMPLE_SIZE = 512 * 1024; // 512KB
@@ -36,17 +36,17 @@ public class FarmPrintFileServiceImpl extends ServiceImpl<FarmPrintFileMapper, F
     private final RustFsClient rustFsClient;
 
     @Override
-    public Page<FarmPrintFile> pageFiles(FarmPrintFileQueryDTO queryDTO) {
-        Page<FarmPrintFile> page = new Page<>(queryDTO.getPageNum(), queryDTO.getPageSize());
-        LambdaQueryWrapper<FarmPrintFile> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(FarmPrintFile::getUserId, SecurityContextUtil.getCurrentUserId())
-                .orderByDesc(FarmPrintFile::getCreatedAt);
+    public Page<PrintFile> pageFiles(PrintFileQueryDTO queryDTO) {
+        Page<PrintFile> page = new Page<>(queryDTO.getPageNum(), queryDTO.getPageSize());
+        LambdaQueryWrapper<PrintFile> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(PrintFile::getUserId, SecurityContextUtil.getCurrentUserId())
+                .orderByDesc(PrintFile::getCreatedAt);
         return this.page(page, wrapper);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public FarmPrintFile uploadAndParseFile(MultipartFile file) {
+    public PrintFile uploadAndParseFile(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new BusinessException("上传文件不能为空");
         }
@@ -117,7 +117,7 @@ public class FarmPrintFileServiceImpl extends ServiceImpl<FarmPrintFileMapper, F
 
         String fileUrl = rustFsClient.uploadFile(safeName, file);
 
-        FarmPrintFile printFile = new FarmPrintFile();
+        PrintFile printFile = new PrintFile();
         printFile.setOriginalName(originalName);
         printFile.setSafeName(safeName);
         printFile.setFileUrl(fileUrl);
@@ -138,10 +138,10 @@ public class FarmPrintFileServiceImpl extends ServiceImpl<FarmPrintFileMapper, F
     @Transactional(rollbackFor = Exception.class)
     public void deleteFile(Long id) {
         Long userId = SecurityContextUtil.getCurrentUserId();
-        LambdaQueryWrapper<FarmPrintFile> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(FarmPrintFile::getId, id)
-                .eq(FarmPrintFile::getUserId, userId);
-        FarmPrintFile target = this.getOne(wrapper, false);
+        LambdaQueryWrapper<PrintFile> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(PrintFile::getId, id)
+                .eq(PrintFile::getUserId, userId);
+        PrintFile target = this.getOne(wrapper, false);
         if (target == null) {
             log.warn("delete print file ignored: not found or no permission, fileId={}, userId={}", id, userId);
             return;

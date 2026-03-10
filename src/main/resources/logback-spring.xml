@@ -88,7 +88,7 @@
 
     <logger name="com.example.farm" level="INFO"/>
     <logger name="com.example.farm.task" level="INFO"/>
-    <logger name="com.example.farm.controller.FarmWebSocketServer" level="WARN"/>
+    <logger name="com.example.farm.controller.WebSocketServer" level="WARN"/>
 
     <logger name="ACCESS_LOG" level="INFO" additivity="false">
         <appender-ref ref="ASYNC_ACCESS_FILE"/>

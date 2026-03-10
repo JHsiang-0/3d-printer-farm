@@ -10,7 +10,7 @@ import java.math.BigDecimal;
  */
 @Data
 @Schema(description = "创建打印任务请求参数")
-public class FarmPrintJobCreateDTO {
+public class PrintJobCreateDTO {
 
     @Schema(description = "切片文件ID (必填)", requiredMode = Schema.RequiredMode.REQUIRED)
     private Long fileId;

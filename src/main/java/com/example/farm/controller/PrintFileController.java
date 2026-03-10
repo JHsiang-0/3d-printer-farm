@@ -3,9 +3,9 @@ package com.example.farm.controller;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.farm.common.api.Result;
 import com.example.farm.common.exception.BusinessException;
-import com.example.farm.entity.FarmPrintFile;
-import com.example.farm.entity.dto.FarmPrintFileQueryDTO;
-import com.example.farm.service.FarmPrintFileService;
+import com.example.farm.entity.PrintFile;
+import com.example.farm.entity.dto.PrintFileQueryDTO;
+import com.example.farm.service.PrintFileService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -25,20 +25,20 @@ import org.springframework.web.multipart.MultipartFile;
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/api/v1/print-files")
-public class FarmPrintFileController {
+public class PrintFileController {
 
-    private final FarmPrintFileService farmPrintFileService;
+    private final PrintFileService farmPrintFileService;
 
     /**
      * 上传并解析切片文件。
      */
     @Operation(summary = "上传并解析切片文件")
     @PostMapping("/upload")
-    public Result<FarmPrintFile> uploadFile(@RequestParam("file") MultipartFile file) {
+    public Result<PrintFile> uploadFile(@RequestParam("file") MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new BusinessException("上传文件不能为空");
         }
-        FarmPrintFile savedFile = farmPrintFileService.uploadAndParseFile(file);
+        PrintFile savedFile = farmPrintFileService.uploadAndParseFile(file);
         return Result.success(savedFile, "文件上传成功");
     }
 
@@ -47,7 +47,7 @@ public class FarmPrintFileController {
      */
     @Operation(summary = "分页查询打印文件列表")
     @PostMapping("/page")
-    public Result<Page<FarmPrintFile>> pageFiles(@RequestBody FarmPrintFileQueryDTO queryDTO) {
+    public Result<Page<PrintFile>> pageFiles(@RequestBody PrintFileQueryDTO queryDTO) {
         return Result.success(farmPrintFileService.pageFiles(queryDTO));
     }
 

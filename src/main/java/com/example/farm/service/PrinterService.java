@@ -3,10 +3,10 @@ package com.example.farm.service;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.example.farm.common.exception.BusinessException;
-import com.example.farm.entity.FarmPrinter;
-import com.example.farm.entity.dto.FarmPrinterAddDTO;
-import com.example.farm.entity.dto.FarmPrinterQueryDTO;
-import com.example.farm.entity.dto.FarmPrinterUpdateDTO;
+import com.example.farm.entity.Printer;
+import com.example.farm.entity.dto.PrinterAddDTO;
+import com.example.farm.entity.dto.PrinterQueryDTO;
+import com.example.farm.entity.dto.PrinterUpdateDTO;
 import com.example.farm.entity.dto.PrinterPositionUpdateDTO;
 import com.example.farm.entity.dto.PrinterScanResultDTO;
 import com.example.farm.entity.vo.PrinterVO;
@@ -16,7 +16,7 @@ import java.util.List;
 /**
  * 打印机服务接口。
  */
-public interface FarmPrinterService extends IService<FarmPrinter> {
+public interface PrinterService extends IService<Printer> {
 
     /**
      * 分页查询打印机列表。
@@ -24,7 +24,7 @@ public interface FarmPrinterService extends IService<FarmPrinter> {
      * @param queryDTO 查询参数
      * @return 打印机分页结果
      */
-    Page<FarmPrinter> pagePrinters(FarmPrinterQueryDTO queryDTO);
+    Page<Printer> pagePrinters(PrinterQueryDTO queryDTO);
 
     /**
      * 新增打印机（基于 MAC 地址的 Upsert 机制）。
@@ -34,7 +34,7 @@ public interface FarmPrinterService extends IService<FarmPrinter> {
      * @param addDTO 新增参数（必须包含 ipAddress）
      * @throws BusinessException 当参数非法或 IP 被其他设备占用时抛出
      */
-    void addPrinter(FarmPrinterAddDTO addDTO);
+    void addPrinter(PrinterAddDTO addDTO);
 
     /**
      * 更新打印机信息。
@@ -42,7 +42,7 @@ public interface FarmPrinterService extends IService<FarmPrinter> {
      * @param updateDTO 更新参数
      * @throws BusinessException 当打印机不存在或目标 IP 被占用时抛出
      */
-    void updatePrinter(FarmPrinterUpdateDTO updateDTO);
+    void updatePrinter(PrinterUpdateDTO updateDTO);
 
     /**
      * 删除打印机。
@@ -61,16 +61,6 @@ public interface FarmPrinterService extends IService<FarmPrinter> {
      */
     List<PrinterScanResultDTO> scanKlipperDevices(String subnet);
 
-    /**
-     * 【兼容旧版】扫描网段内尚未录入的 Klipper 设备。
-     * <p>仅返回 IP 列表，用于向后兼容。</p>
-     *
-     * @param subnet 网段前缀，例如 `192.168.1`
-     * @return 新发现设备 IP 列表
-     * @deprecated 请使用 {@link #scanKlipperDevices(String)} 替代
-     */
-    @Deprecated
-    List<String> scanNewKlipperDevices(String subnet);
 
     /**
      * 【重构】批量新增/更新打印机（基于 MAC 地址的 Upsert 机制）。
@@ -86,16 +76,6 @@ public interface FarmPrinterService extends IService<FarmPrinter> {
      */
     BatchUpsertResult batchUpsertPrinters(List<PrinterScanResultDTO> scanResults);
 
-    /**
-     * 【兼容旧版】批量新增打印机。
-     * <p>直接使用 IP 列表添加，不检查 MAC 地址。</p>
-     *
-     * @param ipList 打印机 IP 列表
-     * @throws BusinessException 当入参为空且业务不允许时抛出
-     * @deprecated 请使用 {@link #batchUpsertPrinters(List)} 替代
-     */
-    @Deprecated
-    void batchAddPrinters(List<String> ipList);
 
     /**
      * 根据 MAC 地址查询打印机。
@@ -103,7 +83,7 @@ public interface FarmPrinterService extends IService<FarmPrinter> {
      * @param macAddress MAC 地址
      * @return 打印机实体，不存在返回 null
      */
-    FarmPrinter getByMacAddress(String macAddress);
+    Printer getByMacAddress(String macAddress);
 
     /**
      * 根据 IP 地址查询打印机。
@@ -111,7 +91,7 @@ public interface FarmPrinterService extends IService<FarmPrinter> {
      * @param ipAddress IP 地址
      * @return 打印机实体，不存在返回 null
      */
-    FarmPrinter getByIpAddress(String ipAddress);
+    Printer getByIpAddress(String ipAddress);
 
     /**
      * 释放被占用的 IP 地址（将对应设备的 IP 设为 NULL，状态设为 OFFLINE）。

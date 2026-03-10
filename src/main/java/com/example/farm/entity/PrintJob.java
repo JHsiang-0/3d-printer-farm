@@ -26,7 +26,7 @@ import java.time.LocalDateTime;
 @ToString
 @TableName("farm_print_job")
 @Schema(name = "FarmPrintJob", description = "打印任务与排队调度表")
-public class FarmPrintJob implements Serializable {
+public class PrintJob implements Serializable {
 
     private static final long serialVersionUID = 1L;
 

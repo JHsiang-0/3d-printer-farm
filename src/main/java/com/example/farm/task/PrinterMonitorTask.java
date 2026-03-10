@@ -1,10 +1,10 @@
 package com.example.farm.task;
 
 import com.example.farm.common.utils.LogUtil;
-import com.example.farm.controller.FarmWebSocketServer;
-import com.example.farm.entity.FarmPrinter;
+import com.example.farm.controller.WebSocketServer;
+import com.example.farm.entity.Printer;
 import com.example.farm.entity.dto.MoonrakerStatusDTO;
-import com.example.farm.service.FarmPrinterService;
+import com.example.farm.service.PrinterService;
 import com.example.farm.service.PrinterCacheService;
 import com.example.farm.common.utils.MoonrakerApiClient;
 import jakarta.annotation.PreDestroy;
@@ -20,7 +20,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
 /**
  * 打印机监控任务
@@ -31,7 +30,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class PrinterMonitorTask {
 
-    private final FarmPrinterService printerService;
+    private final PrinterService printerService;
     private final PrinterCacheService printerCacheService;
     private final MoonrakerApiClient moonrakerApiClient;
 
@@ -68,7 +67,7 @@ public class PrinterMonitorTask {
         
         try {
             // 优先从Redis获取打印机列表
-            List<FarmPrinter> printers = printerCacheService.getAllPrintersFromCache();
+            List<Printer> printers = printerCacheService.getAllPrintersFromCache();
             if (printers == null) {
                 printers = loadPrintersFromDb();
                 if (printers.isEmpty()) {
@@ -101,9 +100,9 @@ public class PrinterMonitorTask {
         }
     }
 
-    private List<FarmPrinter> loadPrintersFromDb() {
+    private List<Printer> loadPrintersFromDb() {
         long startTime = System.currentTimeMillis();
-        List<FarmPrinter> printers = printerService.list();
+        List<Printer> printers = printerService.list();
         long duration = System.currentTimeMillis() - startTime;
         
         LogUtil.slowOperation("loadPrintersFromDb", duration, 1000);
@@ -129,7 +128,7 @@ public class PrinterMonitorTask {
         }
     }
 
-    private PrinterStatusResult fetchAndUpdateStatus(FarmPrinter printer) {
+    private PrinterStatusResult fetchAndUpdateStatus(Printer printer) {
         Long printerId = printer.getId();
         String printerName = printer.getName();
         long startTime = System.currentTimeMillis();
@@ -152,8 +151,8 @@ public class PrinterMonitorTask {
         }
     }
 
-    private void handlePrinterOnline(Long printerId, String printerName, 
-                                     MoonrakerStatusDTO status, FarmPrinter printer, long duration) {
+    private void handlePrinterOnline(Long printerId, String printerName,
+                                     MoonrakerStatusDTO status, Printer printer, long duration) {
         // 缓存状态
         printerCacheService.cachePrinterStatus(printerId, status);
         printerCacheService.recordStatusHistory(printerId, status);
@@ -169,8 +168,8 @@ public class PrinterMonitorTask {
         LogUtil.slowOperation("fetchPrinterStatus", duration, SLOW_THRESHOLD_MS);
     }
 
-    private void updatePrinterStatus(FarmPrinter printer, String newStatus) {
-        FarmPrinter updateEntity = new FarmPrinter();
+    private void updatePrinterStatus(Printer printer, String newStatus) {
+        Printer updateEntity = new Printer();
         updateEntity.setId(printer.getId());
         updateEntity.setStatus(newStatus);
 
@@ -189,9 +188,9 @@ public class PrinterMonitorTask {
         }
     }
 
-    private void handlePrinterOffline(FarmPrinter printer) {
+    private void handlePrinterOffline(Printer printer) {
         if (!"OFFLINE".equals(printer.getStatus())) {
-            FarmPrinter updateEntity = new FarmPrinter();
+            Printer updateEntity = new Printer();
             updateEntity.setId(printer.getId());
             updateEntity.setStatus("OFFLINE");
 
@@ -232,7 +231,7 @@ public class PrinterMonitorTask {
         payload.put("printerId", printerId);
         payload.put("data", status);
         payload.put("timestamp", System.currentTimeMillis());
-        FarmWebSocketServer.broadcastPrinterStatus(payload);
+        WebSocketServer.broadcastPrinterStatus(payload);
     }
 
     private record PrinterStatusResult(Long printerId, MoonrakerStatusDTO status, boolean online) {

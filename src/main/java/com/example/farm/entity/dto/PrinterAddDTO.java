@@ -6,26 +6,23 @@ import lombok.Data;
 import java.math.BigDecimal;
 
 /**
- * 修改打印机请求 DTO
+ * 添加打印机请求 DTO
  */
 @Data
-@Schema(description = "修改打印机请求参数")
-public class FarmPrinterUpdateDTO {
+@Schema(description = "添加打印机请求参数")
+public class PrinterAddDTO {
 
-    @Schema(description = "设备ID (必填)", requiredMode = Schema.RequiredMode.REQUIRED)
-    private Long id;
-
-    @Schema(description = "打印机名称")
+    @Schema(description = "打印机名称 (必填)", requiredMode = Schema.RequiredMode.REQUIRED)
     private String name;
 
-    @Schema(description = "局域网 IP 地址")
+    @Schema(description = "局域网 IP 地址 (必填)", requiredMode = Schema.RequiredMode.REQUIRED)
     private String ipAddress;
 
-    @Schema(description = "MAC 地址")
+    @Schema(description = "MAC 地址 (选填，用于网络唤醒 WOL)")
     private String macAddress;
 
-    @Schema(description = "固件类型")
-    private String firmwareType;
+    @Schema(description = "固件类型 (默认 Klipper)")
+    private String firmwareType = "Klipper";
 
     @Schema(description = "上位机 API 通信密钥")
     private String apiKey;

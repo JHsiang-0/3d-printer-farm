@@ -14,7 +14,7 @@ import java.util.concurrent.CopyOnWriteArraySet;
 @Slf4j
 @Component
 @ServerEndpoint("/ws/farm-status") // 前端大屏连接的 WebSocket 地址
-public class FarmWebSocketServer {
+public class WebSocketServer {
 
     // 存放所有当前在线的前端大屏客户端
     private static final CopyOnWriteArraySet<Session> sessions = new CopyOnWriteArraySet<>();

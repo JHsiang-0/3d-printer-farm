@@ -3,8 +3,8 @@ package com.example.farm.controller;
 import com.example.farm.common.api.Result;
 import com.example.farm.common.exception.BusinessException;
 import com.example.farm.common.utils.MoonrakerApiClient;
-import com.example.farm.entity.FarmPrinter;
-import com.example.farm.service.FarmPrinterService;
+import com.example.farm.entity.Printer;
+import com.example.farm.service.PrinterService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -21,7 +21,7 @@ import org.springframework.web.bind.annotation.*;
 @Tag(name = "打印机控制", description = "打印机硬件控制相关接口")
 public class PrinterControlController {
 
-    private final FarmPrinterService printerService;
+    private final PrinterService printerService;
     private final MoonrakerApiClient moonrakerApiClient;
 
     /**
@@ -34,7 +34,7 @@ public class PrinterControlController {
     @PostMapping("/{id}/emergency-stop")
     @Operation(summary = "发送急停指令", description = "向指定的打印机发送紧急停止命令")
     public Result<String> emergencyStop(@PathVariable Long id) {
-        FarmPrinter printer = printerService.getById(id);
+        Printer printer = printerService.getById(id);
         if (printer == null) {
             throw new BusinessException("打印机不存在");
         }
@@ -60,7 +60,7 @@ public class PrinterControlController {
     @Operation(summary = "暂停打印", description = "向指定的打印机发送暂停打印命令")
     @PostMapping("/{id}/pause")
     public Result<String> pausePrint(@PathVariable Long id) {
-        FarmPrinter printer = printerService.getById(id);
+        Printer printer = printerService.getById(id);
         if (printer == null) {
             throw new BusinessException("打印机不存在");
         }

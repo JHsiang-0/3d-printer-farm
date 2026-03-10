@@ -4,10 +4,10 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.farm.common.constant.RedisKeyConstant;
 import com.example.farm.common.utils.LogUtil;
 import com.example.farm.common.utils.RedisUtil;
-import com.example.farm.entity.FarmPrinter;
-import com.example.farm.entity.FarmPrintJob;
-import com.example.farm.service.FarmPrinterService;
-import com.example.farm.service.FarmPrintJobService;
+import com.example.farm.entity.Printer;
+import com.example.farm.entity.PrintJob;
+import com.example.farm.service.PrinterService;
+import com.example.farm.service.PrintJobService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -28,8 +28,8 @@ import java.util.concurrent.TimeUnit;
 @RequiredArgsConstructor
 public class JobSchedulerTask {
 
-    private final FarmPrintJobService farmPrintJobService;
-    private final FarmPrinterService farmPrinterService;
+    private final PrintJobService printJobService;
+    private final PrinterService printerService;
     private final RedisUtil redisUtil;
 
     // 分布式锁过期时间：10秒
@@ -74,18 +74,18 @@ public class JobSchedulerTask {
         
         try {
             // 获取空闲打印机
-            List<FarmPrinter> idlePrinters = farmPrinterService.list(new LambdaQueryWrapper<FarmPrinter>()
-                    .eq(FarmPrinter::getStatus, "IDLE"));
+            List<Printer> idlePrinters = printerService.list(new LambdaQueryWrapper<Printer>()
+                    .eq(Printer::getStatus, "IDLE"));
 
             if (idlePrinters.isEmpty()) {
                 return;
             }
 
             // 获取排队任务
-            List<FarmPrintJob> queuedJobs = farmPrintJobService.list(new LambdaQueryWrapper<FarmPrintJob>()
-                    .eq(FarmPrintJob::getStatus, "QUEUED")
-                    .orderByDesc(FarmPrintJob::getPriority)
-                    .orderByAsc(FarmPrintJob::getCreatedAt));
+            List<PrintJob> queuedJobs = printJobService.list(new LambdaQueryWrapper<PrintJob>()
+                    .eq(PrintJob::getStatus, "QUEUED")
+                    .orderByDesc(PrintJob::getPriority)
+                    .orderByAsc(PrintJob::getCreatedAt));
 
             if (queuedJobs.isEmpty()) {
                 return;
@@ -116,7 +116,7 @@ public class JobSchedulerTask {
         }
     }
 
-    private boolean tryAssignJob(FarmPrintJob job, FarmPrinter printer) {
+    private boolean tryAssignJob(PrintJob job, Printer printer) {
         Long jobId = job.getId();
         String lockKey = RedisKeyConstant.getKey(RedisKeyConstant.JOB_LOCK, jobId);
         String lockValue = UUID.randomUUID().toString();
@@ -130,13 +130,13 @@ public class JobSchedulerTask {
             }
 
             // 重新查询最新状态
-            FarmPrintJob currentJob = farmPrintJobService.getById(jobId);
+            PrintJob currentJob = printJobService.getById(jobId);
             if (currentJob == null || !"QUEUED".equals(currentJob.getStatus())) {
                 log.debug("任务状态已变化，跳过派发: jobId={}", jobId);
                 return false;
             }
 
-            FarmPrinter currentPrinter = farmPrinterService.getById(printer.getId());
+            Printer currentPrinter = printerService.getById(printer.getId());
             if (currentPrinter == null || !"IDLE".equals(currentPrinter.getStatus())) {
                 log.debug("打印机状态已变化，跳过派发: printerId={}, name={}", printer.getId(), printer.getName());
                 return false;
@@ -151,18 +151,18 @@ public class JobSchedulerTask {
         }
     }
 
-    private boolean assignJob(FarmPrintJob job, FarmPrinter printer) {
+    private boolean assignJob(PrintJob job, Printer printer) {
         try {
             // 更新任务状态
             job.setPrinterId(printer.getId());
             job.setStatus("ASSIGNED");
             job.setStartedAt(LocalDateTime.now());
-            farmPrintJobService.updateById(job);
+            printJobService.updateById(job);
 
             // 更新打印机状态
             printer.setStatus("PREPARING");
             printer.setCurrentJobId(job.getId());
-            farmPrinterService.updateById(printer);
+            printerService.updateById(printer);
 
             LogUtil.dataChange("任务自动派发", "FarmPrintJob", job.getId(),
                     "已分配到打印机: " + printer.getName());

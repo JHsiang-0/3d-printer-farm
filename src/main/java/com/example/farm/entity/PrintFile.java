@@ -20,7 +20,7 @@ import java.time.LocalDateTime;
 @Data
 @TableName("farm_print_file")
 @Schema(name = "FarmPrintFile", description = "打印文件表")
-public class FarmPrintFile {
+public class PrintFile {
 
     @TableId(type = IdType.AUTO)
     @Schema(description = "主键ID")

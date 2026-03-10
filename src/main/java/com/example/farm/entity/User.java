@@ -25,7 +25,7 @@ import java.time.LocalDateTime;
 @ToString
 @TableName("farm_user")
 @Schema(name = "FarmUser", description = "农场用户表")
-public class FarmUser implements Serializable {
+public class User implements Serializable {
 
     private static final long serialVersionUID = 1L;
 

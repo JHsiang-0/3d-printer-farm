@@ -2,9 +2,9 @@ package com.example.farm.service.impl;
 
 import com.example.farm.common.constant.RedisKeyConstant;
 import com.example.farm.common.utils.RedisUtil;
-import com.example.farm.entity.FarmPrinter;
+import com.example.farm.entity.Printer;
 import com.example.farm.entity.dto.MoonrakerStatusDTO;
-import com.example.farm.mapper.FarmPrinterMapper;
+import com.example.farm.mapper.PrinterMapper;
 import com.example.farm.service.PrinterCacheService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import lombok.RequiredArgsConstructor;
@@ -27,7 +27,7 @@ import java.util.stream.Collectors;
 public class PrinterCacheServiceImpl implements PrinterCacheService {
 
     private final RedisUtil redisUtil;
-    private final FarmPrinterMapper farmPrinterMapper;
+    private final PrinterMapper printerMapper;
 
     // 缓存过期时间：10秒
     private static final long STATUS_CACHE_TTL = 10;
@@ -74,7 +74,7 @@ public class PrinterCacheServiceImpl implements PrinterCacheService {
     }
 
     @Override
-    public boolean updatePrinterStatusWithLock(FarmPrinter printer) {
+    public boolean updatePrinterStatusWithLock(Printer printer) {
         if (printer == null || printer.getId() == null) return false;
 
         Long printerId = printer.getId();
@@ -89,7 +89,7 @@ public class PrinterCacheServiceImpl implements PrinterCacheService {
                 return false;
             }
 
-            farmPrinterMapper.updateById(printer);
+            printerMapper.updateById(printer);
             return true;
 
         } catch (Exception e) {
@@ -243,13 +243,13 @@ public class PrinterCacheServiceImpl implements PrinterCacheService {
     }
 
     @Override
-    public List<FarmPrinter> getAllPrintersFromCache() {
+    public List<Printer> getAllPrintersFromCache() {
         String key = RedisKeyConstant.PRINTER_LIST;
-        return redisUtil.get(key, new TypeReference<List<FarmPrinter>>() {});
+        return redisUtil.get(key, new TypeReference<List<Printer>>() {});
     }
 
     @Override
-    public void cacheAllPrinters(List<FarmPrinter> printers) {
+    public void cacheAllPrinters(List<Printer> printers) {
         if (printers == null || printers.isEmpty()) {
             log.warn("缓存打印机列表时跳过空列表");
             return;

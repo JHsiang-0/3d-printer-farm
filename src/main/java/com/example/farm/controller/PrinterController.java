@@ -3,14 +3,14 @@ package com.example.farm.controller;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.farm.common.api.Result;
 import com.example.farm.common.exception.BusinessException;
-import com.example.farm.entity.FarmPrinter;
-import com.example.farm.entity.dto.FarmPrinterAddDTO;
-import com.example.farm.entity.dto.FarmPrinterQueryDTO;
-import com.example.farm.entity.dto.FarmPrinterUpdateDTO;
+import com.example.farm.entity.Printer;
+import com.example.farm.entity.dto.PrinterAddDTO;
+import com.example.farm.entity.dto.PrinterQueryDTO;
+import com.example.farm.entity.dto.PrinterUpdateDTO;
 import com.example.farm.entity.dto.PrinterPositionUpdateDTO;
 import com.example.farm.entity.dto.PrinterScanResultDTO;
 import com.example.farm.entity.vo.PrinterVO;
-import com.example.farm.service.FarmPrinterService;
+import com.example.farm.service.PrinterService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -29,9 +29,9 @@ import java.util.List;
 @RequestMapping("/api/v1/printers")
 @RequiredArgsConstructor
 @Tag(name = "打印机管理", description = "打印机资产与状态管理相关接口")
-public class FarmPrinterController {
+public class PrinterController {
 
-    private final FarmPrinterService printerService;
+    private final PrinterService printerService;
 
     /**
      * 分页查询打印机列表。
@@ -41,7 +41,7 @@ public class FarmPrinterController {
      */
     @Operation(summary = "分页查询打印机列表", description = "支持按名称和状态筛选的分页查询")
     @GetMapping("/page")
-    public Result<Page<FarmPrinter>> getPrinterPage(FarmPrinterQueryDTO queryDTO) {
+    public Result<Page<Printer>> getPrinterPage(PrinterQueryDTO queryDTO) {
         return Result.success(printerService.pagePrinters(queryDTO));
     }
 
@@ -60,7 +60,7 @@ public class FarmPrinterController {
      */
     @Operation(summary = "新增打印机", description = "基于 MAC 地址的 Upsert 机制，解决 DHCP 动态分配导致的设备重复录入问题")
     @PostMapping("/add")
-    public Result<String> addPrinter(@RequestBody FarmPrinterAddDTO addDTO) {
+    public Result<String> addPrinter(@RequestBody PrinterAddDTO addDTO) {
         if (!StringUtils.hasText(addDTO.getIpAddress())) {
             throw new BusinessException("打印机 IP 地址不能为空");
         }
@@ -80,7 +80,7 @@ public class FarmPrinterController {
      */
     @Operation(summary = "更新打印机信息", description = "修改打印机的名称、IP、MAC、耗材等配置信息")
     @PutMapping("/update")
-    public Result<String> updatePrinter(@RequestBody FarmPrinterUpdateDTO updateDTO) {
+    public Result<String> updatePrinter(@RequestBody PrinterUpdateDTO updateDTO) {
         if (updateDTO.getId() == null) {
             throw new BusinessException("设备 ID 不能为空");
         }
@@ -152,13 +152,13 @@ public class FarmPrinterController {
      */
     @Operation(summary = "批量添加打印机", description = "基于 MAC 地址的 Upsert 机制，批量录入扫描到的设备")
     @PostMapping("/batch-add")
-    public Result<FarmPrinterService.BatchUpsertResult> batchAdd(
+    public Result<PrinterService.BatchUpsertResult> batchAdd(
             @RequestBody List<PrinterScanResultDTO> scanResults) {
         if (scanResults == null || scanResults.isEmpty()) {
             throw new BusinessException("设备列表不能为空");
         }
 
-        FarmPrinterService.BatchUpsertResult result = printerService.batchUpsertPrinters(scanResults);
+        PrinterService.BatchUpsertResult result = printerService.batchUpsertPrinters(scanResults);
 
         return Result.success(result, result.getMessage());
     }
@@ -172,11 +172,11 @@ public class FarmPrinterController {
      */
     @Operation(summary = "根据 MAC 地址查询打印机", description = "通过 MAC 地址精确查询打印机信息")
     @GetMapping("/by-mac/{macAddress}")
-    public Result<FarmPrinter> getByMacAddress(@PathVariable String macAddress) {
+    public Result<Printer> getByMacAddress(@PathVariable String macAddress) {
         if (!StringUtils.hasText(macAddress)) {
             throw new BusinessException("MAC 地址不能为空");
         }
-        FarmPrinter printer = printerService.getByMacAddress(macAddress);
+        Printer printer = printerService.getByMacAddress(macAddress);
         if (printer == null) {
             return Result.success(null, "未找到该 MAC 地址的设备");
         }
@@ -191,11 +191,11 @@ public class FarmPrinterController {
      */
     @Operation(summary = "根据 IP 地址查询打印机", description = "通过 IP 地址精确查询打印机信息")
     @GetMapping("/by-ip/{ipAddress}")
-    public Result<FarmPrinter> getByIpAddress(@PathVariable String ipAddress) {
+    public Result<Printer> getByIpAddress(@PathVariable String ipAddress) {
         if (!StringUtils.hasText(ipAddress)) {
             throw new BusinessException("IP 地址不能为空");
         }
-        FarmPrinter printer = printerService.getByIpAddress(ipAddress);
+        Printer printer = printerService.getByIpAddress(ipAddress);
         if (printer == null) {
             return Result.success(null, "未找到该 IP 地址的设备");
         }

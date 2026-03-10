@@ -9,7 +9,7 @@ import com.example.farm.common.exception.BusinessException;
 import com.example.farm.common.utils.JwtUtils;
 import com.example.farm.common.utils.LoginProtectUtil;
 import com.example.farm.common.utils.PasswordMigrationUtil;
-import com.example.farm.entity.FarmUser;
+import com.example.farm.entity.User;
 import com.example.farm.entity.dto.ChangePasswordDTO;
 import com.example.farm.entity.dto.LoginResultDTO;
 import com.example.farm.entity.dto.PasswordMigrateResultDTO;
@@ -18,8 +18,8 @@ import com.example.farm.entity.dto.UserLoginDTO;
 import com.example.farm.entity.dto.UserQueryDTO;
 import com.example.farm.entity.dto.UserRegisterDTO;
 import com.example.farm.entity.dto.UserUpdateDTO;
-import com.example.farm.mapper.FarmUserMapper;
-import com.example.farm.service.FarmUserService;
+import com.example.farm.mapper.UserMapper;
+import com.example.farm.service.UserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -33,7 +33,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class FarmUserServiceImpl extends ServiceImpl<FarmUserMapper, FarmUser> implements FarmUserService {
+public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements UserService {
 
     private static final String ROLE_ADMIN = "ADMIN";
     private static final String ROLE_OPERATOR = "OPERATOR";
@@ -55,7 +55,7 @@ public class FarmUserServiceImpl extends ServiceImpl<FarmUserMapper, FarmUser> i
             throw new BusinessException("账号已锁定，请 " + remainingMinutes + " 分钟后重试");
         }
 
-        FarmUser user = findByUsername(username);
+        User user = findByUsername(username);
         if (user == null) {
             loginProtectUtil.recordLoginFail(username);
             throw new BusinessException("账号或密码错误");
@@ -113,7 +113,7 @@ public class FarmUserServiceImpl extends ServiceImpl<FarmUserMapper, FarmUser> i
             throw new BusinessException("邮箱已被注册");
         }
 
-        FarmUser newUser = new FarmUser();
+        User newUser = new User();
         newUser.setUsername(registerDTO.getUsername());
         newUser.setPasswordHash(passwordEncoder.encode(registerDTO.getPassword()));
         newUser.setEmail(registerDTO.getEmail());
@@ -132,7 +132,7 @@ public class FarmUserServiceImpl extends ServiceImpl<FarmUserMapper, FarmUser> i
             throw new BusinessException("两次输入的新密码不一致");
         }
 
-        FarmUser user = getById(userId);
+        User user = getById(userId);
         if (user == null) {
             throw new BusinessException("用户不存在");
         }
@@ -159,7 +159,7 @@ public class FarmUserServiceImpl extends ServiceImpl<FarmUserMapper, FarmUser> i
     @Override
     @Transactional
     public void updateUserInfo(UserUpdateDTO updateDTO) {
-        FarmUser user = getById(updateDTO.getId());
+        User user = getById(updateDTO.getId());
         if (user == null) {
             throw new BusinessException("用户不存在");
         }
@@ -184,8 +184,8 @@ public class FarmUserServiceImpl extends ServiceImpl<FarmUserMapper, FarmUser> i
     }
 
     @Override
-    public FarmUser getCurrentUser(Long userId) {
-        FarmUser user = getById(userId);
+    public User getCurrentUser(Long userId) {
+        User user = getById(userId);
         if (user == null) {
             throw new BusinessException("用户不存在");
         }
@@ -194,22 +194,22 @@ public class FarmUserServiceImpl extends ServiceImpl<FarmUserMapper, FarmUser> i
     }
 
     @Override
-    public IPage<FarmUser> pageUsers(UserQueryDTO queryDTO) {
-        Page<FarmUser> page = new Page<>(queryDTO.getPageNum(), queryDTO.getPageSize());
-        LambdaQueryWrapper<FarmUser> wrapper = new LambdaQueryWrapper<>();
+    public IPage<User> pageUsers(UserQueryDTO queryDTO) {
+        Page<User> page = new Page<>(queryDTO.getPageNum(), queryDTO.getPageSize());
+        LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
 
         if (StringUtils.isNotBlank(queryDTO.getUsername())) {
-            wrapper.like(FarmUser::getUsername, queryDTO.getUsername());
+            wrapper.like(User::getUsername, queryDTO.getUsername());
         }
         if (StringUtils.isNotBlank(queryDTO.getRole())) {
-            wrapper.eq(FarmUser::getRole, queryDTO.getRole());
+            wrapper.eq(User::getRole, queryDTO.getRole());
         }
         if (StringUtils.isNotBlank(queryDTO.getEmail())) {
-            wrapper.like(FarmUser::getEmail, queryDTO.getEmail());
+            wrapper.like(User::getEmail, queryDTO.getEmail());
         }
 
-        wrapper.orderByDesc(FarmUser::getCreatedAt);
-        IPage<FarmUser> result = page(page, wrapper);
+        wrapper.orderByDesc(User::getCreatedAt);
+        IPage<User> result = page(page, wrapper);
         result.getRecords().forEach(u -> u.setPasswordHash(null));
         return result;
     }
@@ -217,7 +217,7 @@ public class FarmUserServiceImpl extends ServiceImpl<FarmUserMapper, FarmUser> i
     @Override
     @Transactional
     public void disableUser(Long userId, Long adminId) {
-        FarmUser user = getById(userId);
+        User user = getById(userId);
         if (user == null) {
             throw new BusinessException("用户不存在");
         }
@@ -234,7 +234,7 @@ public class FarmUserServiceImpl extends ServiceImpl<FarmUserMapper, FarmUser> i
     @Override
     @Transactional
     public void enableUser(Long userId, Long adminId) {
-        FarmUser user = getById(userId);
+        User user = getById(userId);
         if (user == null) {
             throw new BusinessException("用户不存在");
         }
@@ -246,8 +246,8 @@ public class FarmUserServiceImpl extends ServiceImpl<FarmUserMapper, FarmUser> i
 
     @Override
     public boolean isUsernameExists(String username) {
-        LambdaQueryWrapper<FarmUser> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(FarmUser::getUsername, username);
+        LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(User::getUsername, username);
         return count(wrapper) > 0;
     }
 
@@ -256,8 +256,8 @@ public class FarmUserServiceImpl extends ServiceImpl<FarmUserMapper, FarmUser> i
         if (StringUtils.isBlank(email)) {
             return false;
         }
-        LambdaQueryWrapper<FarmUser> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(FarmUser::getEmail, email);
+        LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(User::getEmail, email);
         return count(wrapper) > 0;
     }
 
@@ -267,7 +267,7 @@ public class FarmUserServiceImpl extends ServiceImpl<FarmUserMapper, FarmUser> i
         int migratedCount = 0;
         int skippedCount = 0;
 
-        for (FarmUser user : list()) {
+        for (User user : list()) {
             String currentHash = user.getPasswordHash();
             if (PasswordMigrationUtil.isEncrypted(currentHash)) {
                 skippedCount++;
@@ -290,7 +290,7 @@ public class FarmUserServiceImpl extends ServiceImpl<FarmUserMapper, FarmUser> i
         int encryptedCount = 0;
         int plainCount = 0;
 
-        for (FarmUser user : list()) {
+        for (User user : list()) {
             if (PasswordMigrationUtil.isEncrypted(user.getPasswordHash())) {
                 encryptedCount++;
             } else {
@@ -301,14 +301,14 @@ public class FarmUserServiceImpl extends ServiceImpl<FarmUserMapper, FarmUser> i
         return new PasswordStatusResultDTO(encryptedCount, plainCount, encryptedCount + plainCount);
     }
 
-    private FarmUser findByUsername(String username) {
-        LambdaQueryWrapper<FarmUser> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(FarmUser::getUsername, username);
+    private User findByUsername(String username) {
+        LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(User::getUsername, username);
         return getOne(wrapper);
     }
 
     private void assertAdmin(Long adminId) {
-        FarmUser admin = getById(adminId);
+        User admin = getById(adminId);
         if (admin == null) {
             throw new BusinessException("管理员账号不存在");
         }

@@ -1,7 +1,7 @@
 package com.example.farm.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-import com.example.farm.entity.FarmPrintJob;
+import com.example.farm.entity.PrintJob;
 import org.apache.ibatis.annotations.Mapper;
 
 /**
@@ -13,6 +13,6 @@ import org.apache.ibatis.annotations.Mapper;
  * @since 2026-03-01
  */
 @Mapper
-public interface FarmPrintJobMapper extends BaseMapper<FarmPrintJob> {
+public interface PrintJobMapper extends BaseMapper<PrintJob> {
 
 }

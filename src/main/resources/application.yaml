@@ -11,13 +11,13 @@ spring:
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://localhost:3306/farm?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
-    username: farm
-    password: YBW5esRQwm4fm3X2
+    username: farm_test
+    password: farm_test
   data:
     redis:
       host: localhost
       port: 6379
-      password: redis_ZSeBDY      # 如果没有密码留空
+      password:       # 如果没有密码留空
       database: 0
       timeout: 5s
       lettuce:
@@ -36,8 +36,8 @@ mybatis-plus:
   type-aliases-package: com.example.farm.entity
 rustfs:
   endpoint: http://127.0.0.1:9000
-  access-key: rustfsadmin
-  secret-key: rustfsadmin_fzSNXB
+  access-key: admin
+  secret-key: admin
   bucket: farm   # 注意：S3 的 bucket 名字不能有下划线，最好用中划线
 jwt:
   # JWT 密钥（生产环境请使用复杂随机字符串，并通过环境变量注入）
@@ -59,7 +59,7 @@ logging:
     root: INFO
     com.example.farm: INFO
     com.example.farm.task: INFO
-    com.example.farm.controller.FarmWebSocketServer: WARN
+    com.example.farm.controller.com.example.farm.controller.WebSocketServer: WARN
     org.springframework: WARN
     org.springframework.web: WARN
     org.apache.ibatis: WARN

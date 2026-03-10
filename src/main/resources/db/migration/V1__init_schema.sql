@@ -109,7 +109,7 @@ CREATE TABLE `farm_print_job` (
 -- 5. 插入默认管理员账号
 -- 密码: Admin123 (BCrypt加密后的值)
 -- ----------------------------------------------------
-INSERT INTO `farm_user` (`username`, `password`, `email`, `phone`, `role`, `status`, `created_at`, `updated_at`) VALUES
+INSERT INTO `farm_user` (`username`, `password_hash`, `email`, `phone`, `role`, `status`, `created_at`, `updated_at`) VALUES
 ('admin', '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iAt6Z5EO', 'admin@example.com', '13800138000', 'ADMIN', 1, NOW(), NOW());
 
 SET FOREIGN_KEY_CHECKS = 1;

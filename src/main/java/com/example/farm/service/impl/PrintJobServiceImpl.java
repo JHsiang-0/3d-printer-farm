@@ -7,14 +7,14 @@ import com.example.farm.common.utils.LogUtil;
 import com.example.farm.common.utils.MoonrakerApiClient;
 import com.example.farm.common.utils.RustFsClient;
 import com.example.farm.common.utils.SecurityContextUtil;
-import com.example.farm.entity.FarmPrintFile;
-import com.example.farm.entity.FarmPrintJob;
-import com.example.farm.entity.FarmPrinter;
-import com.example.farm.entity.dto.FarmPrintJobCreateDTO;
-import com.example.farm.mapper.FarmPrintFileMapper;
-import com.example.farm.mapper.FarmPrintJobMapper;
-import com.example.farm.service.FarmPrintJobService;
-import com.example.farm.service.FarmPrinterService;
+import com.example.farm.entity.PrintFile;
+import com.example.farm.entity.PrintJob;
+import com.example.farm.entity.Printer;
+import com.example.farm.entity.dto.PrintJobCreateDTO;
+import com.example.farm.mapper.PrintFileMapper;
+import com.example.farm.mapper.PrintJobMapper;
+import com.example.farm.service.PrintJobService;
+import com.example.farm.service.PrinterService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -27,23 +27,23 @@ import java.util.List;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class FarmPrintJobServiceImpl extends ServiceImpl<FarmPrintJobMapper, FarmPrintJob> implements FarmPrintJobService {
+public class PrintJobServiceImpl extends ServiceImpl<PrintJobMapper, PrintJob> implements PrintJobService {
 
-    private final FarmPrintJobMapper farmPrintJobMapper;
-    private final FarmPrintFileMapper farmPrintFileMapper;
-    private final FarmPrinterService farmPrinterService;
+    private final PrintJobMapper farmPrintJobMapper;
+    private final PrintFileMapper printFileMapper;
+    private final PrinterService printerService;
     private final RustFsClient rustFsClient;
     private final MoonrakerApiClient moonrakerApiClient;
 
     @Override
-    public FarmPrintJobMapper getBaseMapper() {
+    public PrintJobMapper getBaseMapper() {
         return farmPrintJobMapper;
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long submitJob(Long fileId, Long userId, Integer priority) {
-        FarmPrintJob job = new FarmPrintJob();
+        PrintJob job = new PrintJob();
         job.setFileId(fileId);
         job.setUserId(userId);
         job.setPriority(priority != null ? priority : 0);
@@ -55,34 +55,34 @@ public class FarmPrintJobServiceImpl extends ServiceImpl<FarmPrintJobMapper, Far
     }
 
     @Override
-    public List<FarmPrintJob> getQueuedJobs() {
-        return this.list(new LambdaQueryWrapper<FarmPrintJob>()
-                .in(FarmPrintJob::getStatus, "QUEUED", "MANUAL")
-                .orderByDesc(FarmPrintJob::getPriority)
-                .orderByAsc(FarmPrintJob::getCreatedAt));
+    public List<PrintJob> getQueuedJobs() {
+        return this.list(new LambdaQueryWrapper<PrintJob>()
+                .in(PrintJob::getStatus, "QUEUED", "MANUAL")
+                .orderByDesc(PrintJob::getPriority)
+                .orderByAsc(PrintJob::getCreatedAt));
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Long createJob(FarmPrintJobCreateDTO req) {
+    public Long createJob(PrintJobCreateDTO req) {
         Long currentUserId = SecurityContextUtil.getCurrentUserId();
         return createJob(req, currentUserId);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Long createJob(FarmPrintJobCreateDTO req, Long userId) {
+    public Long createJob(PrintJobCreateDTO req, Long userId) {
         if (userId == null) {
             throw new BusinessException("用户未登录，无法创建任务");
         }
 
-        FarmPrintFile fileRecord = farmPrintFileMapper.selectById(req.getFileId());
+        PrintFile fileRecord = printFileMapper.selectById(req.getFileId());
         if (fileRecord == null) {
             log.warn("创建打印任务失败：切片文件不存在，fileId={}, userId={}", req.getFileId(), userId);
             throw new BusinessException("所选的切片文件不存在");
         }
 
-        FarmPrintJob job = new FarmPrintJob();
+        PrintJob job = new PrintJob();
         job.setUserId(userId);
         job.setFileId(req.getFileId());
         job.setFileUrl(fileRecord.getFileUrl());
@@ -106,8 +106,8 @@ public class FarmPrintJobServiceImpl extends ServiceImpl<FarmPrintJobMapper, Far
     @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean assignAndStartPrint(Long jobId, Long printerId) {
-        FarmPrintJob job = this.getById(jobId);
-        FarmPrinter printer = farmPrinterService.getById(printerId);
+        PrintJob job = this.getById(jobId);
+        Printer printer = printerService.getById(printerId);
 
         if (job == null || printer == null) {
             log.warn("派发打印任务失败：任务或打印机不存在，jobId={}, printerId={}", jobId, printerId);
@@ -132,7 +132,7 @@ public class FarmPrintJobServiceImpl extends ServiceImpl<FarmPrintJobMapper, Far
             throw new BusinessException("装载耗材不匹配(" + job.getMaterialType() + " vs " + printer.getCurrentMaterial() + ")");
         }
 
-        FarmPrintFile fileRecord = farmPrintFileMapper.selectById(job.getFileId());
+        PrintFile fileRecord = printFileMapper.selectById(job.getFileId());
         if (fileRecord == null) {
             throw new BusinessException("切片文件数据缺失");
         }
@@ -161,7 +161,7 @@ public class FarmPrintJobServiceImpl extends ServiceImpl<FarmPrintJobMapper, Far
         this.updateById(job);
 
         printer.setStatus("PRINTING");
-        farmPrinterService.updateById(printer);
+        printerService.updateById(printer);
 
         LogUtil.dataChange("启动打印任务", "FarmPrintJob", job.getId(), "已分配到打印机: " + printer.getName());
         return true;

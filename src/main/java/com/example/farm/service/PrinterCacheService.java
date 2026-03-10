@@ -1,6 +1,6 @@
 package com.example.farm.service;
 
-import com.example.farm.entity.FarmPrinter;
+import com.example.farm.entity.Printer;
 import com.example.farm.entity.dto.MoonrakerStatusDTO;
 
 import java.util.List;
@@ -47,7 +47,7 @@ public interface PrinterCacheService {
      * @param printer 打印机实体
      * @return `true` 表示更新成功
      */
-    boolean updatePrinterStatusWithLock(FarmPrinter printer);
+    boolean updatePrinterStatusWithLock(Printer printer);
 
     /**
      * 尝试获取打印机状态更新锁。
@@ -142,14 +142,14 @@ public interface PrinterCacheService {
      *
      * @return 打印机列表
      */
-    List<FarmPrinter> getAllPrintersFromCache();
+    List<Printer> getAllPrintersFromCache();
 
     /**
      * 缓存全量打印机列表。
      *
      * @param printers 打印机列表
      */
-    void cacheAllPrinters(List<FarmPrinter> printers);
+    void cacheAllPrinters(List<Printer> printers);
 
     /**
      * 刷新打印机列表缓存。

@@ -2,9 +2,9 @@ package com.example.farm.controller;
 
 import com.example.farm.common.api.Result;
 import com.example.farm.common.exception.BusinessException;
-import com.example.farm.entity.FarmPrintJob;
-import com.example.farm.entity.dto.FarmPrintJobCreateDTO;
-import com.example.farm.service.FarmPrintJobService;
+import com.example.farm.entity.PrintJob;
+import com.example.farm.entity.dto.PrintJobCreateDTO;
+import com.example.farm.service.PrintJobService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -21,9 +21,9 @@ import java.util.List;
 @Slf4j
 @RequestMapping("/api/v1/print-jobs")
 @RequiredArgsConstructor
-public class FarmPrintJobController {
+public class PrintJobController {
 
-    private final FarmPrintJobService farmPrintJobService;
+    private final PrintJobService printJobService;
 
     /**
      * 查询排队中的任务。
@@ -32,8 +32,8 @@ public class FarmPrintJobController {
      */
     @Operation(summary = "获取排队中的任务队列")
     @GetMapping("/queue")
-    public Result<List<FarmPrintJob>> getQueue() {
-        return Result.success(farmPrintJobService.getQueuedJobs());
+    public Result<List<PrintJob>> getQueue() {
+        return Result.success(printJobService.getQueuedJobs());
     }
 
     /**
@@ -44,9 +44,9 @@ public class FarmPrintJobController {
      * @throws BusinessException 当参数非法或关联文件不存在时抛出
      */
     @Operation(summary = "创建打印任务")
-    @PostMapping("")
-    public Result<Long> createJob(@RequestBody FarmPrintJobCreateDTO req) {
-        Long jobId = farmPrintJobService.createJob(req);
+    @PostMapping("create")
+    public Result<Long> createJob(@RequestBody PrintJobCreateDTO req) {
+        Long jobId = printJobService.createJob(req);
         log.info("创建打印任务请求完成: jobId={}, autoAssign={}", jobId, req.getAutoAssign());
         return Result.success(jobId, "任务创建成功");
     }
@@ -61,10 +61,10 @@ public class FarmPrintJobController {
     @Operation(summary = "取消任务")
     @DeleteMapping("/{id}")
     public Result<String> cancelJob(@PathVariable Long id) {
-        FarmPrintJob job = farmPrintJobService.getById(id);
+        PrintJob job = printJobService.getById(id);
         if (job != null && "QUEUED".equals(job.getStatus())) {
             job.setStatus("CANCELED");
-            farmPrintJobService.updateById(job);
+            printJobService.updateById(job);
             log.info("取消打印任务成功: jobId={}", id);
             return Result.success(null, "任务已取消");
         }
@@ -82,7 +82,7 @@ public class FarmPrintJobController {
     @Operation(summary = "手动指派任务给打印机并开始")
     @PostMapping("/{jobId}/assign")
     public Result<String> assignJob(@PathVariable Long jobId, @RequestParam Long printerId) {
-        boolean success = farmPrintJobService.assignAndStartPrint(jobId, printerId);
+        boolean success = printJobService.assignAndStartPrint(jobId, printerId);
         if (!success) {
             throw new BusinessException("任务派发失败，请检查任务与打印机状态");
         }

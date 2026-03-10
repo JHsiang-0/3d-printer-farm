@@ -8,7 +8,7 @@ import lombok.Data;
  */
 @Data
 @Schema(description = "打印文件分页查询参数")
-public class FarmPrintFileQueryDTO {
+public class PrintFileQueryDTO {
 
     @Schema(description = "当前页码 (默认第1页)")
     private Integer pageNum = 1;

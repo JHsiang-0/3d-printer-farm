@@ -2,15 +2,15 @@ package com.example.farm.service;
 
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.example.farm.common.exception.BusinessException;
-import com.example.farm.entity.FarmPrintJob;
-import com.example.farm.entity.dto.FarmPrintJobCreateDTO;
+import com.example.farm.entity.PrintJob;
+import com.example.farm.entity.dto.PrintJobCreateDTO;
 
 import java.util.List;
 
 /**
  * 打印任务服务接口。
  */
-public interface FarmPrintJobService extends IService<FarmPrintJob> {
+public interface PrintJobService extends IService<PrintJob> {
 
     /**
      * 提交打印任务（兼容旧接口）。
@@ -28,7 +28,7 @@ public interface FarmPrintJobService extends IService<FarmPrintJob> {
      *
      * @return 任务列表
      */
-    List<FarmPrintJob> getQueuedJobs();
+    List<PrintJob> getQueuedJobs();
 
     /**
      * 创建打印任务（用户从上下文中获取）。
@@ -37,7 +37,7 @@ public interface FarmPrintJobService extends IService<FarmPrintJob> {
      * @return 任务 ID
      * @throws BusinessException 当用户未登录或文件不存在时抛出
      */
-    Long createJob(FarmPrintJobCreateDTO req);
+    Long createJob(PrintJobCreateDTO req);
 
     /**
      * 创建打印任务（显式指定用户）。
@@ -47,7 +47,7 @@ public interface FarmPrintJobService extends IService<FarmPrintJob> {
      * @return 任务 ID
      * @throws BusinessException 当用户未登录或文件不存在时抛出
      */
-    Long createJob(FarmPrintJobCreateDTO req, Long userId);
+    Long createJob(PrintJobCreateDTO req, Long userId);
 
     /**
      * 派发任务并启动打印。

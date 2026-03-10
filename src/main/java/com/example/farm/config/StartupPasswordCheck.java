@@ -1,8 +1,7 @@
 package com.example.farm.config;
 
 import com.example.farm.common.utils.PasswordMigrationUtil;
-import com.example.farm.entity.FarmUser;
-import com.example.farm.service.FarmUserService;
+import com.example.farm.service.UserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
@@ -18,7 +17,7 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class StartupPasswordCheck implements ApplicationRunner {
 
-    private final FarmUserService userService;
+    private final UserService userService;
 
     @Override
     public void run(ApplicationArguments args) {

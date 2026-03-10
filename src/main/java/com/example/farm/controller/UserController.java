@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.example.farm.common.api.Result;
 import com.example.farm.common.exception.BusinessException;
 import com.example.farm.common.utils.SecurityContextUtil;
-import com.example.farm.entity.FarmUser;
+import com.example.farm.entity.User;
 import com.example.farm.entity.dto.ChangePasswordDTO;
 import com.example.farm.entity.dto.LoginResultDTO;
 import com.example.farm.entity.dto.PasswordMigrateResultDTO;
@@ -13,7 +13,7 @@ import com.example.farm.entity.dto.UserLoginDTO;
 import com.example.farm.entity.dto.UserQueryDTO;
 import com.example.farm.entity.dto.UserRegisterDTO;
 import com.example.farm.entity.dto.UserUpdateDTO;
-import com.example.farm.service.FarmUserService;
+import com.example.farm.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -37,9 +37,9 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/auth")
 @RequiredArgsConstructor
-public class FarmUserController {
+public class UserController {
 
-    private final FarmUserService farmUserService;
+    private final UserService userService;
 
     @Value("${admin.secret-key}")
     private String adminSecretKey;
@@ -47,13 +47,13 @@ public class FarmUserController {
     @Operation(summary = "用户登录")
     @PostMapping("/login")
     public Result<LoginResultDTO> login(@Valid @RequestBody UserLoginDTO loginDTO) {
-        return Result.success(farmUserService.login(loginDTO), "登录成功");
+        return Result.success(userService.login(loginDTO), "登录成功");
     }
 
     @Operation(summary = "用户注册")
     @PostMapping("/register")
     public Result<Long> register(@Valid @RequestBody UserRegisterDTO registerDTO) {
-        return Result.success(farmUserService.register(registerDTO), "注册成功");
+        return Result.success(userService.register(registerDTO), "注册成功");
     }
 
     @Operation(summary = "修改密码")
@@ -61,15 +61,15 @@ public class FarmUserController {
     public Result<String> changePassword(@PathVariable Long userId,
                                          @Valid @RequestBody ChangePasswordDTO changePasswordDTO) {
         ensureCurrentUser(userId);
-        farmUserService.changePassword(userId, changePasswordDTO);
+        userService.changePassword(userId, changePasswordDTO);
         return Result.success(null, "密码修改成功");
     }
 
     @Operation(summary = "获取当前用户信息")
     @GetMapping("/{userId}/profile")
-    public Result<FarmUser> getCurrentUser(@PathVariable Long userId) {
+    public Result<User> getCurrentUser(@PathVariable Long userId) {
         ensureCurrentUser(userId);
-        return Result.success(farmUserService.getCurrentUser(userId));
+        return Result.success(userService.getCurrentUser(userId));
     }
 
     @Operation(summary = "更新用户信息")
@@ -79,14 +79,14 @@ public class FarmUserController {
         ensureCurrentUser(userId);
         updateDTO.setId(userId);
         updateDTO.setRole(null);
-        farmUserService.updateUserInfo(updateDTO);
+        userService.updateUserInfo(updateDTO);
         return Result.success(null, "信息更新成功");
     }
 
     @Operation(summary = "管理员查询用户列表")
     @GetMapping("/admin/users")
-    public Result<IPage<FarmUser>> pageUsers(UserQueryDTO queryDTO) {
-        return Result.success(farmUserService.pageUsers(queryDTO));
+    public Result<IPage<User>> pageUsers(UserQueryDTO queryDTO) {
+        return Result.success(userService.pageUsers(queryDTO));
     }
 
     @Operation(summary = "管理员更新用户信息")
@@ -94,7 +94,7 @@ public class FarmUserController {
     public Result<String> adminUpdateUser(@PathVariable Long userId,
                                           @Valid @RequestBody UserUpdateDTO updateDTO) {
         updateDTO.setId(userId);
-        farmUserService.updateUserInfo(updateDTO);
+        userService.updateUserInfo(updateDTO);
         return Result.success(null, "用户信息更新成功");
     }
 
@@ -102,7 +102,7 @@ public class FarmUserController {
     @PostMapping("/admin/users/{userId}/disable")
     public Result<String> disableUser(@PathVariable Long userId) {
         Long adminId = SecurityContextUtil.getCurrentUserId();
-        farmUserService.disableUser(userId, adminId);
+        userService.disableUser(userId, adminId);
         return Result.success(null, "用户已禁用");
     }
 
@@ -110,7 +110,7 @@ public class FarmUserController {
     @PostMapping("/admin/users/{userId}/enable")
     public Result<String> enableUser(@PathVariable Long userId) {
         Long adminId = SecurityContextUtil.getCurrentUserId();
-        farmUserService.enableUser(userId, adminId);
+        userService.enableUser(userId, adminId);
         return Result.success(null, "用户已启用");
     }
 
@@ -118,7 +118,7 @@ public class FarmUserController {
     @PostMapping("/admin/migrate-passwords")
     public Result<PasswordMigrateResultDTO> migrateAllPasswords(@RequestParam String adminSecret) {
         validateAdminSecret(adminSecret);
-        PasswordMigrateResultDTO result = farmUserService.migrateAllPasswords();
+        PasswordMigrateResultDTO result = userService.migrateAllPasswords();
         return Result.success(result,
                 String.format("密码迁移完成：已迁移 %d 个，跳过 %d 个", result.getMigratedCount(), result.getSkippedCount()));
     }
@@ -127,20 +127,20 @@ public class FarmUserController {
     @GetMapping("/admin/password-status")
     public Result<PasswordStatusResultDTO> checkPasswordStatus(@RequestParam String adminSecret) {
         validateAdminSecret(adminSecret);
-        return Result.success(farmUserService.checkPasswordStatus());
+        return Result.success(userService.checkPasswordStatus());
     }
 
     @Operation(summary = "检查用户名是否可用")
     @GetMapping("/check-username")
     public Result<Boolean> checkUsername(@RequestParam String username) {
-        boolean exists = farmUserService.isUsernameExists(username);
+        boolean exists = userService.isUsernameExists(username);
         return Result.success(!exists, exists ? "用户名已被使用" : "用户名可用");
     }
 
     @Operation(summary = "检查邮箱是否可用")
     @GetMapping("/check-email")
     public Result<Boolean> checkEmail(@RequestParam String email) {
-        boolean exists = farmUserService.isEmailExists(email);
+        boolean exists = userService.isEmailExists(email);
         return Result.success(!exists, exists ? "邮箱已被使用" : "邮箱可用");
     }
 
