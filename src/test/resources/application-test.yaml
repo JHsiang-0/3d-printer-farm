@@ -1,0 +1,75 @@
+# ===========================================
+# 3D打印农场管理系统 - 测试环境配置
+# ===========================================
+
+spring:
+  config:
+    activate:
+      on-profile: test
+
+  # 禁用所有外部依赖，测试使用内存数据库
+  datasource:
+    url: jdbc:h2:mem:testdb;MODE=MySQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+
+  # 禁用 Redis，测试时需要 Mock
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+  # 禁用 Flyway，测试使用 schema.sql 初始化
+  flyway:
+    enabled: false
+
+  # 禁用 Thymeleaf 模板引擎（如果使用 Freemarker）
+  freemarker:
+    enabled: false
+
+# H2 控制台（开发测试时启用）
+h2:
+  console:
+    enabled: true
+
+# MyBatis-Plus 测试配置
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
+  global-config:
+    enable-sql-runner: false
+
+# JWT 测试配置
+jwt:
+  secret-key: test-secret-key-for-unit-test-only
+  expire-time: 3600000
+
+# 管理员测试配置
+admin:
+  secret-key: test-admin-key
+
+# RustFS 测试配置（Mock）
+rustfs:
+  endpoint: http://localhost:9000
+  access-key: test-key
+  secret-key: test-secret
+  bucket: test-bucket
+
+# 日志配置 - 减少输出
+logging:
+  level:
+    root: WARN
+    com.example.farm: INFO
+    org.springframework: WARN
+    org.springframework.security: WARN
+    org.apache.ibatis: WARN
+
+# 测试环境服务器配置
+server:
+  port: 0  # 随机端口
+
+# 测试环境应用配置
+farm:
+  websocket:
+    enabled: false
