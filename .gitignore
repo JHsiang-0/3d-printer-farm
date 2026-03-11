@@ -38,10 +38,10 @@ HELP.md
 .vscode/
 
 # Configuration files with sensitive data
-# 注意：生产环境应该使用 application-prod.yml 并通过环境变量注入
+# 注意：生产环境应该使用 application-prod.yaml 并通过环境变量注入
 /src/main/resources/application-local.yml
-/src/main/resources/application-dev.yml
-/src/main/resources/application-prod.yml
+/src/main/resources/application-dev.yaml
+/src/main/resources/application-prod.yaml
 
 # Temporary files
 *.tmp

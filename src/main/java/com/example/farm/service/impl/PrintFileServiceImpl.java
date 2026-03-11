@@ -8,6 +8,7 @@ import com.example.farm.common.utils.GCodeParser;
 import com.example.farm.common.utils.RustFsClient;
 import com.example.farm.common.utils.SecurityContextUtil;
 import com.example.farm.entity.PrintFile;
+import com.example.farm.entity.PrintJob;
 import com.example.farm.entity.dto.PrintFileQueryDTO;
 import com.example.farm.mapper.PrintFileMapper;
 import com.example.farm.service.PrintFileService;
@@ -21,8 +22,11 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Slf4j
 @Service
@@ -37,11 +41,58 @@ public class PrintFileServiceImpl extends ServiceImpl<PrintFileMapper, PrintFile
 
     @Override
     public Page<PrintFile> pageFiles(PrintFileQueryDTO queryDTO) {
+        Long userId = SecurityContextUtil.getCurrentUserId();
         Page<PrintFile> page = new Page<>(queryDTO.getPageNum(), queryDTO.getPageSize());
+
+        // 分页查询当前用户文件列表
         LambdaQueryWrapper<PrintFile> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(PrintFile::getUserId, SecurityContextUtil.getCurrentUserId())
+        wrapper.eq(PrintFile::getUserId, userId)
                 .orderByDesc(PrintFile::getCreatedAt);
-        return this.page(page, wrapper);
+        Page<PrintFile> resultPage = this.page(page, wrapper);
+
+        // 统计每个文件的打印次数和成功率
+        if (resultPage.getRecords() != null && !resultPage.getRecords().isEmpty()) {
+            for (PrintFile printFile : resultPage.getRecords()) {
+                calculatePrintStats(printFile);
+            }
+        }
+
+        return resultPage;
+    }
+
+    /**
+     * 计算打印统计信息（打印次数和成功率）
+     */
+    private void calculatePrintStats(PrintFile printFile) {
+        if (printFile.getId() == null) {
+            return;
+        }
+
+        // 查询该文件的所有打印任务
+        LambdaQueryWrapper<PrintJob> jobWrapper = new LambdaQueryWrapper<>();
+        jobWrapper.eq(PrintJob::getFileId, printFile.getId());
+        // 只统计已完成和失败的任务（排除正在进行的）
+        jobWrapper.in(PrintJob::getStatus, "COMPLETED", "FAILED", "CANCELED");
+
+        Long userId = SecurityContextUtil.getCurrentUserId();
+        Long fileId = printFile.getId();
+
+        // 使用原生 SQL 进行统计查询
+        Integer totalCount = baseMapper.countPrintJobsByFileId(fileId, userId, null);
+        Integer completedCount = baseMapper.countPrintJobsByFileId(fileId, userId, "COMPLETED");
+
+        printFile.setPrintCount(totalCount != null ? totalCount : 0);
+
+        if (totalCount != null && totalCount > 0 && completedCount != null) {
+            // 计算成功率 = 完成数 / 总数 * 100
+            BigDecimal rate = new BigDecimal(completedCount)
+                    .divide(new BigDecimal(totalCount), 4, RoundingMode.HALF_UP)
+                    .multiply(new BigDecimal("100"))
+                    .setScale(2, RoundingMode.HALF_UP);
+            printFile.setSuccessRate(rate);
+        } else {
+            printFile.setSuccessRate(BigDecimal.ZERO);
+        }
     }
 
     @Override
@@ -129,6 +180,27 @@ public class PrintFileServiceImpl extends ServiceImpl<PrintFileMapper, PrintFile
         printFile.setMaterialType(meta.getMaterialType() != null ? meta.getMaterialType() : "PLA");
         printFile.setNozzleSize(meta.getNozzleSize() != null ? meta.getNozzleSize() : new BigDecimal("0.40"));
 
+        // 设置耗材重量和长度（长度已从 mm 转换为 m）
+        printFile.setFilamentWeight(meta.getFilamentWeight());
+        printFile.setFilamentLength(meta.getFilamentLength());
+
+        // 提取并上传缩略图
+        try {
+            String thumbnailBase64 = GCodeParser.extractThumbnailBase64(metaContent);
+            if (thumbnailBase64 != null && !thumbnailBase64.isEmpty()) {
+                String thumbnailUrl = uploadThumbnailToRustFS(thumbnailBase64, safeName);
+                if (thumbnailUrl != null) {
+                    printFile.setThumbnailUrl(thumbnailUrl);
+                    log.info("缩略图提取并上传成功: fileId={}, thumbnailUrl={}", printFile.getId(), thumbnailUrl);
+                }
+            } else {
+                log.debug("G-code 中未找到缩略图: safeName={}", safeName);
+            }
+        } catch (Exception e) {
+            log.warn("缩略图提取或上传失败，继续保存文件: safeName={}", safeName, e);
+            // 缩略图失败不影响主流程
+        }
+
         this.save(printFile);
         log.info("切片文件入库成功: fileId={}, userId={}, safeName={}", printFile.getId(), userId, safeName);
         return printFile;
@@ -151,6 +223,64 @@ public class PrintFileServiceImpl extends ServiceImpl<PrintFileMapper, PrintFile
         rustFsClient.deleteFile(objectKey);
         this.removeById(target.getId());
         log.info("print file deleted from rustfs and db: fileId={}, userId={}, key={}", id, userId, objectKey);
+    }
+
+    @Override
+    public String getPresignedDownloadUrl(Long id, Integer expirationMinutes) {
+        Long userId = SecurityContextUtil.getCurrentUserId();
+        PrintFile file = this.getById(id);
+        if (file == null || !file.getUserId().equals(userId)) {
+            throw new BusinessException("文件不存在或无权限访问");
+        }
+
+        Duration expiration = expirationMinutes != null && expirationMinutes > 0
+                ? Duration.ofMinutes(expirationMinutes)
+                : Duration.ofHours(1);
+
+        return rustFsClient.getPresignedUrl(file.getSafeName(), expiration);
+    }
+
+    @Override
+    public org.springframework.core.io.InputStreamResource downloadFile(Long id) {
+        Long userId = SecurityContextUtil.getCurrentUserId();
+        PrintFile file = this.getById(id);
+        if (file == null || !file.getUserId().equals(userId)) {
+            throw new BusinessException("文件不存在或无权限访问");
+        }
+        return rustFsClient.getFileStream(file.getSafeName());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void batchDeleteFiles(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return;
+        }
+        Long userId = SecurityContextUtil.getCurrentUserId();
+
+        // 查询用户拥有的文件
+        LambdaQueryWrapper<PrintFile> wrapper = new LambdaQueryWrapper<>();
+        wrapper.in(PrintFile::getId, ids)
+                .eq(PrintFile::getUserId, userId);
+        List<PrintFile> files = this.list(wrapper);
+
+        if (files.isEmpty()) {
+            return;
+        }
+
+        // 删除 RustFS 中的文件
+        for (PrintFile file : files) {
+            try {
+                rustFsClient.deleteFile(file.getSafeName());
+            } catch (Exception e) {
+                log.warn("删除 RustFS 文件失败: key={}, error={}", file.getSafeName(), e.getMessage());
+            }
+        }
+
+        // 批量删除数据库记录
+        List<Long> idsToDelete = files.stream().map(PrintFile::getId).toList();
+        this.removeByIds(idsToDelete);
+        log.info("批量删除文件完成: userId={}, deletedCount={}", userId, idsToDelete.size());
     }
 
     private String extractHeadAndTail(MultipartFile file) {
@@ -241,6 +371,36 @@ public class PrintFileServiceImpl extends ServiceImpl<PrintFileMapper, PrintFile
         } catch (Exception e) {
             log.warn("failed to read full gcode content for metadata fallback", e);
             return "";
+        }
+    }
+
+    /**
+     * 将 Base64 缩略图解码并上传到 RustFS。
+     *
+     * @param base64Data Base64 编码的图片数据
+     * @param safeName   原文件的安全名称（用于生成缩略图 key）
+     * @return 缩略图的 URL，失败返回 null
+     */
+    private String uploadThumbnailToRustFS(String base64Data, String safeName) {
+        try {
+            // 提取图片格式
+            String contentType = "image/jpeg"; // 默认 JPEG
+            if (base64Data.contains("/9j/")) {
+                contentType = "image/jpeg";
+            } else if (base64Data.startsWith("iVBOR")) {
+                contentType = "image/png";
+            }
+
+            // Base64 解码
+            byte[] imageBytes = java.util.Base64.getDecoder().decode(base64Data);
+
+            // 生成缩略图 key
+            String thumbnailKey = "thumbnails/" + safeName.replace(".gcode", "." + contentType.split("/")[1]);
+
+            return rustFsClient.uploadBytes(thumbnailKey, imageBytes, contentType);
+        } catch (Exception e) {
+            log.warn("缩略图上传失败: safeName={}, error={}", safeName, e.getMessage());
+            return null;
         }
     }
 }

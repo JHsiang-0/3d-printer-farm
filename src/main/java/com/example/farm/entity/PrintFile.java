@@ -1,6 +1,7 @@
 package com.example.farm.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -52,4 +53,21 @@ public class PrintFile {
 
     @Schema(description = "喷嘴直径（如 0.40, 0.60）")
     private BigDecimal nozzleSize;
+
+    @Schema(description = "缩略图URL（G-code中提取的缩略图在RustFS中的地址）")
+    private String thumbnailUrl;
+
+    @Schema(description = "耗材预估重量（克）")
+    private BigDecimal filamentWeight;
+
+    @Schema(description = "耗材预估长度（米）")
+    private BigDecimal filamentLength;
+
+    @TableField(exist = false)
+    @Schema(description = "打印总次数（非持久化字段，通过统计计算）")
+    private Integer printCount;
+
+    @TableField(exist = false)
+    @Schema(description = "打印成功率（非持久化字段，通过统计计算，0-100）")
+    private BigDecimal successRate;
 }

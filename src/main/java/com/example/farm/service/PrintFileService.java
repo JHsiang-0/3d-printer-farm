@@ -36,4 +36,31 @@ public interface PrintFileService extends IService<PrintFile> {
      * @throws BusinessException 当文件不存在或当前用户无权删除时抛出
      */
     void deleteFile(Long id);
+
+    /**
+     * 下载文件。
+     *
+     * @param id 文件 ID
+     * @return 文件流和资源
+     * @throws BusinessException 当文件不存在或当前用户无权访问时抛出
+     */
+    org.springframework.core.io.InputStreamResource downloadFile(Long id);
+
+    /**
+     * 批量删除文件。
+     *
+     * @param ids 文件 ID 列表
+     * @throws BusinessException 当任一文件不存在或当前用户无权删除时抛出
+     */
+    void batchDeleteFiles(java.util.List<Long> ids);
+
+    /**
+     * 获取文件的预签名下载 URL。
+     *
+     * @param id 文件 ID
+     * @param expirationMinutes 过期时间（分钟），默认 60 分钟
+     * @return 预签名 URL
+     * @throws BusinessException 当文件不存在或当前用户无权访问时抛出
+     */
+    String getPresignedDownloadUrl(Long id, Integer expirationMinutes);
 }

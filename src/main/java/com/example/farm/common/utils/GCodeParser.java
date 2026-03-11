@@ -30,12 +30,38 @@ public class GCodeParser {
     private static final Pattern LINE_WIDTH_PATTERN = Pattern.compile(
             "(?im)^\\s*;?\\s*(?:line_width|default_line_width|outer_wall_line_width|inner_wall_line_width|wall_line_width|perimeter_line_width|external_perimeter_line_width)\\s*[:=]\\s*\\[?\\s*([0-9]+(?:\\.[0-9]+)?)");
 
+    // Filament weight patterns (filament used = weight in grams)
+    private static final Pattern FILAMENT_WEIGHT_PATTERN = Pattern.compile(
+            "(?im)^\\s*;?\\s*(?:filament used|filament_used|total filament used|filament weight)\\s*[:=]\\s*([0-9]+(?:\\.[0-9]+)?)\\s*(?:g|gram|grams)?");
+
+    // Alternative weight pattern for OrcaSlicer/Bambu Studio format: "; filament used [g] = 12.34"
+    private static final Pattern FILAMENT_WEIGHT_ALT_PATTERN = Pattern.compile(
+            "(?im)^\\s*;?\\s*filament used\\s*\\[g\\]\\s*[:=]\\s*([0-9]+(?:\\.[0-9]+)?)");
+
+    // Filament length patterns (filament used = length in mm)
+    private static final Pattern FILAMENT_LENGTH_PATTERN = Pattern.compile(
+            "(?im)^\\s*;?\\s*(?:filament used|filament_used|total filament used)\\s*[:=]\\s*([0-9]+(?:\\.[0-9]+)?)\\s*(?:mm|meter|m)?");
+
+    // Alternative length pattern for OrcaSlicer/Bambu Studio format: "; filament used [mm] = 1234.56"
+    private static final Pattern FILAMENT_LENGTH_ALT_PATTERN = Pattern.compile(
+            "(?im)^\\s*;?\\s*filament used\\s*\\[mm\\]\\s*[:=]\\s*([0-9]+(?:\\.[0-9]+)?)");
+
+    // Thumbnail pattern for base64 encoded images in G-code
+    private static final Pattern THUMBNAIL_START_PATTERN = Pattern.compile(
+            "(?im)^\\s*;\\s*(?:thumbnail|thumbnail_JPG|thumbnail_PNG)\\s*(?:begin|start)");
+    private static final Pattern THUMBNAIL_DATA_PATTERN = Pattern.compile(
+            "(?im)^\\s*;\\s*([A-Za-z0-9+/=]{50,})");
+    private static final Pattern THUMBNAIL_END_PATTERN = Pattern.compile(
+            "(?im)^\\s*;\\s*(?:thumbnail|thumbnail_JPG|thumbnail_PNG)\\s*(?:end|stop)");
+
     @Data
     public static class GCodeMeta {
         private Integer estTime = 0;
         private String materialType;
         private BigDecimal nozzleSize;
         private BigDecimal lineWidth;
+        private BigDecimal filamentWeight;  // 耗材重量(g)
+        private BigDecimal filamentLength;  // 耗材长度(mm)
     }
 
     public static GCodeMeta parseMetadata(String content) {
@@ -56,6 +82,24 @@ public class GCodeParser {
 
         meta.setNozzleSize(parseDecimal(content, NOZZLE_PATTERN));
         meta.setLineWidth(parseDecimal(content, LINE_WIDTH_PATTERN));
+
+        // Parse filament weight (g) - try multiple patterns
+        BigDecimal weight = parseDecimal(content, FILAMENT_WEIGHT_ALT_PATTERN);
+        if (weight == null) {
+            weight = parseDecimal(content, FILAMENT_WEIGHT_PATTERN);
+        }
+        meta.setFilamentWeight(weight);
+
+        // Parse filament length (mm) - try multiple patterns
+        BigDecimal length = parseDecimal(content, FILAMENT_LENGTH_ALT_PATTERN);
+        if (length == null) {
+            length = parseDecimal(content, FILAMENT_LENGTH_PATTERN);
+        }
+        // Convert mm to meters if length is large (> 1000mm)
+        if (length != null && length.compareTo(new BigDecimal("1000")) > 0) {
+            length = length.divide(new BigDecimal("1000"), 2, java.math.RoundingMode.HALF_UP);
+        }
+        meta.setFilamentLength(length);
 
         return meta;
     }
@@ -212,5 +256,55 @@ public class GCodeParser {
         String name = slash >= 0 ? filename.substring(slash + 1) : filename;
         int dot = name.lastIndexOf('.');
         return dot > 0 ? name.substring(0, dot) : name;
+    }
+
+    /**
+     * 从 G-code 内容中提取 Base64 编码的缩略图
+     *
+     * @param content G-code 文件内容
+     * @return 缩略图的 Base64 字符串，如果没有找到则返回 null
+     */
+    public static String extractThumbnailBase64(String content) {
+        if (content == null || content.isEmpty()) {
+            return null;
+        }
+
+        StringBuilder base64Builder = new StringBuilder();
+        boolean inThumbnail = false;
+
+        String[] lines = content.split("\\r?\\n");
+
+        for (String line : lines) {
+            // 检测缩略图开始
+            if (THUMBNAIL_START_PATTERN.matcher(line).find()) {
+                inThumbnail = true;
+                base64Builder.setLength(0);
+                log.debug("检测到缩略图开始标记");
+                continue;
+            }
+
+            // 检测缩略图结束
+            if (THUMBNAIL_END_PATTERN.matcher(line).find()) {
+                inThumbnail = false;
+                log.debug("检测到缩略图结束标记");
+                break;
+            }
+
+            // 提取 Base64 数据
+            if (inThumbnail) {
+                Matcher dataMatcher = THUMBNAIL_DATA_PATTERN.matcher(line);
+                if (dataMatcher.find()) {
+                    base64Builder.append(dataMatcher.group(1));
+                }
+            }
+        }
+
+        String base64Data = base64Builder.toString();
+        if (base64Data.isEmpty()) {
+            return null;
+        }
+
+        log.info("成功从 G-code 提取缩略图，Base64 长度: {} 字符", base64Data.length());
+        return base64Data;
     }
 }

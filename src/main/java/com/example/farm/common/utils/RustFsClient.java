@@ -17,9 +17,13 @@ import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.HeadBucketRequest;
 import software.amazon.awssdk.services.s3.model.NoSuchBucketException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.presigner.S3Presigner;
+import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 
 import java.io.InputStream;
 import java.net.URI;
+import java.time.Duration;
+import java.util.UUID;
 
 @Slf4j
 @Component
@@ -38,6 +42,7 @@ public class RustFsClient {
     private String bucket;
 
     private S3Client s3Client;
+    private S3Presigner s3Presigner;
 
     @PostConstruct
     public void init() {
@@ -52,6 +57,15 @@ public class RustFsClient {
                     ))
                     // 适配 RustFS 的 Path-Style 地址。
                     .forcePathStyle(true)
+                    .build();
+
+            // 初始化预签名客户端
+            this.s3Presigner = S3Presigner.builder()
+                    .endpointOverride(URI.create(endpoint))
+                    .region(Region.US_EAST_1)
+                    .credentialsProvider(StaticCredentialsProvider.create(
+                            AwsBasicCredentials.create(accessKey, secretKey)
+                    ))
                     .build();
 
             // 启动时自动检查并创建 Bucket。
@@ -162,6 +176,68 @@ public class RustFsClient {
         } catch (Exception e) {
             log.error("RustFS 对象删除失败: bucket={}, key={}", bucket, filename, e);
             throw new RuntimeException("对象存储删除失败");
+        }
+    }
+
+    /**
+     * 获取文件的预签名 URL（用于直接下载或分享）。
+     *
+     * @param filename 对象 Key
+     * @param expiration 过期时间（默认 1 小时）
+     * @return 预签名 URL 字符串
+     */
+    public String getPresignedUrl(String filename, Duration expiration) {
+        try {
+            GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
+                    .signatureDuration(expiration != null ? expiration : Duration.ofHours(1))
+                    .getObjectRequest(GetObjectRequest.builder()
+                            .bucket(bucket)
+                            .key(filename)
+                            .build())
+                    .build();
+
+            return s3Presigner.presignGetObject(presignRequest).url().toString();
+        } catch (Exception e) {
+            log.error("生成预签名 URL 失败: key={}", filename, e);
+            throw new RuntimeException("生成预签名 URL 失败");
+        }
+    }
+
+    /**
+     * 获取文件的预签名 URL（默认 1 小时过期）。
+     *
+     * @param filename 对象 Key
+     * @return 预签名 URL 字符串
+     */
+    public String getPresignedUrl(String filename) {
+        return getPresignedUrl(filename, null);
+    }
+
+    /**
+     * 上传字节数组到 RustFS（用于缩略图等小文件）。
+     *
+     * @param key         对象 Key
+     * @param data        字节数组
+     * @param contentType Content-Type
+     * @return 文件 URL
+     */
+    public String uploadBytes(String key, byte[] data, String contentType) {
+        try {
+            PutObjectRequest putObjectRequest = PutObjectRequest.builder()
+                    .bucket(bucket)
+                    .key(key)
+                    .contentType(contentType != null ? contentType : "application/octet-stream")
+                    .build();
+
+            s3Client.putObject(putObjectRequest, RequestBody.fromBytes(data));
+
+            String fileUrl = String.format("%s/%s/%s", endpoint, bucket, key);
+            log.info("字节数组上传成功: key={}, size={} bytes", key, data.length);
+            return fileUrl;
+
+        } catch (Exception e) {
+            log.error("字节数组上传失败: key={}", key, e);
+            throw new RuntimeException("对象存储上传失败");
         }
     }
 }
