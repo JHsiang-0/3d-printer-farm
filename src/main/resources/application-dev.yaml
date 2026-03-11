@@ -1,0 +1,77 @@
+# ===========================================
+# 3D打印农场管理系统 - 开发环境配置
+# ===========================================
+
+spring:
+  config:
+    activate:
+      on-profile: dev
+
+  # 开发环境数据源配置
+  datasource:
+    url: jdbc:mysql://localhost:3306/farm?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: farm
+    password: YBW5esRQwm4fm3X2
+    hikari:
+      pool-name: FarmHikariPool-Dev
+      # 开发环境使用较小的连接池
+      minimum-idle: 2
+      maximum-pool-size: 10
+      connection-timeout: 20000
+      idle-timeout: 300000
+      max-lifetime: 1200000
+
+  # 开发环境Redis配置
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password: redis_ZSeBDY
+      database: 0
+      timeout: 5s
+      lettuce:
+        pool:
+          max-active: 4
+          max-idle: 4
+          min-idle: 1
+          max-wait: 5s
+
+# RustFS开发环境配置
+rustfs:
+  endpoint: http://127.0.0.1:9000
+  access-key: rustfsadmin
+  secret-key: rustfsadmin_fzSNXB
+
+# 开发环境日志配置 - 更详细的日志输出
+logging:
+  level:
+    root: INFO
+    com.example.farm: DEBUG
+    com.example.farm.mapper: DEBUG  # 打印SQL语句
+    com.example.farm.task: DEBUG
+    org.springframework.web: DEBUG
+    org.springframework.web.socket: DEBUG
+    org.apache.ibatis: DEBUG
+    io.lettuce.core: INFO
+    com.zaxxer.hikari: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %highlight(%-5level) [%thread] %cyan(%logger{36}) - %msg%n"
+
+# 开发环境服务器配置
+server:
+  port: 8080
+  tomcat:
+    # 开发环境使用较小的线程池
+    threads:
+      max: 50
+      min-spare: 5
+    max-connections: 1000
+    accept-count: 50
+
+# 开发环境应用配置
+farm:
+  websocket:
+    enabled: true
+    max-connections: 100
+  # Moonraker API 模拟器（开发环境使用固定密钥）
+  moonraker-api-key: dev-moonraker-key

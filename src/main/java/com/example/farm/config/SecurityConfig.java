@@ -41,7 +41,7 @@ public class SecurityConfig {
                         .requestMatchers("/ws/**").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         // Moonraker API 模拟器（OrcaSlicer 等切片软件）
-                        .requestMatchers("/server/**", "/printer/**", "/machine/**").permitAll()
+                        .requestMatchers("/server/**", "/printer/**", "/machine/**","/api/files/**").permitAll()
                         .anyRequest().authenticated()
                 );
 
