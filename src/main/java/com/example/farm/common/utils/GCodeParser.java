@@ -7,57 +7,81 @@ import java.math.BigDecimal;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * G-code 元数据解析器
+ * 支持 OrcaSlicer / BambuStudio / PrusaSlicer 的 G-code Header 解析
+ * 线程安全，不使用静态可变变量
+ */
 @Slf4j
 public class GCodeParser {
 
+    // ==================== 时间解析 ====================
     private static final Pattern TIME_SECONDS_PATTERN = Pattern.compile("(?im)^\\s*;?\\s*TIME\\s*[:=]\\s*(\\d+)\\s*$");
     private static final Pattern EST_TIME_PATTERN = Pattern.compile("(?im)^\\s*;?\\s*estimated_time\\s*[:=]\\s*(\\d+)\\s*$");
-    private static final Pattern TIME_TEXT_PATTERN = Pattern.compile(
-            "(?im)^\\s*;?\\s*(?:estimated printing time(?:\\s*\\([^)]*\\))?|total estimated time|estimated time)\\s*[:=]\\s*([^\\r\\n]+)");
+    private static final Pattern EST_PRINTING_TIME_PATTERN = Pattern.compile(
+            "(?im)^\\s*;?\\s*estimated printing time(?:\\s*\\([^)]*\\))?\\s*[:=]\\s*([^\\r\\n]+)");
     private static final Pattern DURATION_TOKEN_PATTERN = Pattern.compile("(?i)(\\d+)\\s*([dhms])");
     private static final Pattern DURATION_HMS_COLON_PATTERN = Pattern.compile("^(\\d{1,2}):(\\d{1,2})(?::(\\d{1,2}))?$");
-    private static final Pattern MATERIAL_TOKEN_PATTERN = Pattern.compile("(?i)^[a-z][a-z0-9+\\-_.]*$");
-    private static final Pattern ORCA_FILENAME_META_PATTERN = Pattern.compile(
-            "(?i)^.*_([0-9]+(?:\\.[0-9]+)?)mm_([^_]+)_(.+)_([^_]+)$");
 
-    private static final Pattern MATERIAL_PATTERN = Pattern.compile(
-            "(?im)^\\s*;?\\s*(?:filament_type|filament type|material_type|material)\\s*[:=]\\s*([^\\r\\n]+)");
+    // ==================== 耗材统计解析 ====================
+    private static final Pattern FILAMENT_USED_MM_PATTERN = Pattern.compile(
+            "(?im)^\\s*;?\\s*filament used\\s*\\[mm\\]\\s*[:=]\\s*([0-9]+(?:\\.[0-9]+)?)");
+    private static final Pattern FILAMENT_USED_G_PATTERN = Pattern.compile(
+            "(?im)^\\s*;?\\s*(?:filament used\\s*\\[g\\]|total filament used\\s*\\[g\\])\\s*[:=]\\s*([0-9]+(?:\\.[0-9]+)?)");
+    private static final Pattern FILAMENT_USED_CM3_PATTERN = Pattern.compile(
+            "(?im)^\\s*;?\\s*filament used\\s*\\[cm3\\]\\s*[:=]\\s*([0-9]+(?:\\.[0-9]+)?)");
+    private static final Pattern FILAMENT_COST_PATTERN = Pattern.compile(
+            "(?im)^\\s*;?\\s*filament cost\\s*[:=]\\s*([0-9]+(?:\\.[0-9]+)?)");
+    private static final Pattern TOTAL_LAYERS_PATTERN = Pattern.compile(
+            "(?im)^\\s*;?\\s*total layers count\\s*[:=]\\s*(\\d+)");
 
-    // OrcaSlicer/Bambu/Prusa style: nozzle_diameter = 0.4 or nozzle_diameter = 0.4,0.4
-    private static final Pattern NOZZLE_PATTERN = Pattern.compile(
-            "(?im)^\\s*;?\\s*nozzle_diameter\\s*[:=]\\s*\\[?\\s*([0-9]+(?:\\.[0-9]+)?)");
-
-    // Common line width keys in different slicers
-    private static final Pattern LINE_WIDTH_PATTERN = Pattern.compile(
-            "(?im)^\\s*;?\\s*(?:line_width|default_line_width|outer_wall_line_width|inner_wall_line_width|wall_line_width|perimeter_line_width|external_perimeter_line_width)\\s*[:=]\\s*\\[?\\s*([0-9]+(?:\\.[0-9]+)?)");
-
-    // Filament weight patterns (filament used = weight in grams)
+    // ==================== 耗材相关（兼容旧版）====================
     private static final Pattern FILAMENT_WEIGHT_PATTERN = Pattern.compile(
             "(?im)^\\s*;?\\s*(?:filament used|filament_used|total filament used|filament weight)\\s*[:=]\\s*([0-9]+(?:\\.[0-9]+)?)\\s*(?:g|gram|grams)?");
-
-    // Alternative weight pattern for OrcaSlicer/Bambu Studio format: "; filament used [g] = 12.34"
-    private static final Pattern FILAMENT_WEIGHT_ALT_PATTERN = Pattern.compile(
-            "(?im)^\\s*;?\\s*filament used\\s*\\[g\\]\\s*[:=]\\s*([0-9]+(?:\\.[0-9]+)?)");
-
-    // Filament length patterns (filament used = length in mm)
     private static final Pattern FILAMENT_LENGTH_PATTERN = Pattern.compile(
             "(?im)^\\s*;?\\s*(?:filament used|filament_used|total filament used)\\s*[:=]\\s*([0-9]+(?:\\.[0-9]+)?)\\s*(?:mm|meter|m)?");
 
-    // Alternative length pattern for OrcaSlicer/Bambu Studio format: "; filament used [mm] = 1234.56"
-    private static final Pattern FILAMENT_LENGTH_ALT_PATTERN = Pattern.compile(
-            "(?im)^\\s*;?\\s*filament used\\s*\\[mm\\]\\s*[:=]\\s*([0-9]+(?:\\.[0-9]+)?)");
+    // ==================== 材料解析 ====================
+    private static final Pattern MATERIAL_TOKEN_PATTERN = Pattern.compile("(?i)^[a-z][a-z0-9+\\-_.]*$");
+    private static final Pattern MATERIAL_PATTERN = Pattern.compile(
+            "(?im)^\\s*;?\\s*(?:filament_type|filament type|material_type|material)\\s*[:=]\\s*([^\\r\\n]+)");
+    private static final Pattern ORCA_FILENAME_META_PATTERN = Pattern.compile(
+            "(?i)^.*_([0-9]+(?:\\.[0-9]+)?)mm_([^_]+)_(.+)_([^_]+)$");
 
-    // OrcaSlicer temperature patterns
+    // ==================== 喷嘴直径解析 ====================
+    private static final Pattern NOZZLE_PATTERN = Pattern.compile(
+            "(?im)^\\s*;?\\s*nozzle_diameter\\s*[:=]\\s*\\[?\\s*([0-9]+(?:\\.[0-9]+)?)");
+
+    // ==================== 线宽解析 ====================
+    private static final Pattern LINE_WIDTH_PATTERN = Pattern.compile(
+            "(?im)^\\s*;?\\s*(?:line_width|default_line_width|outer_wall_line_width|inner_wall_line_width|wall_line_width|perimeter_line_width|external_perimeter_line_width)\\s*[:=]\\s*\\[?\\s*([0-9]+(?:\\.[0-9]+)?)");
+
+    // ==================== 温度解析（分开独立解析）====================
+    // nozzle_temperature - 喷头温度
     private static final Pattern NOZZLE_TEMP_PATTERN = Pattern.compile(
-            "(?im)^\\s*;?\\s*nozzle_temperature(?:_initial|_first_layer)?\\s*[:=]\\s*(\\d+)");
+            "(?im)^\\s*;?\\s*nozzle_temperature\\s*[:=]\\s*(\\d+)");
+    // nozzle_temperature_initial_layer - 首层喷头温度
+    private static final Pattern NOZZLE_TEMP_INITIAL_LAYER_PATTERN = Pattern.compile(
+            "(?im)^\\s*;?\\s*nozzle_temperature_initial_layer\\s*[:=]\\s*(\\d+)");
+    // bed_temperature - 热床温度
     private static final Pattern BED_TEMP_PATTERN = Pattern.compile(
-            "(?im)^\\s*;?\\s*bed_temperature(?:_initial|_first_layer)?\\s*[:=]\\s*(\\d+)");
+            "(?im)^\\s*;?\\s*bed_temperature\\s*[:=]\\s*(\\d+)");
+    // first_layer_bed_temperature - 首层热床温度
+    private static final Pattern BED_TEMP_FIRST_LAYER_PATTERN = Pattern.compile(
+            "(?im)^\\s*;?\\s*first_layer_bed_temperature\\s*[:=]\\s*(\\d+)");
 
-    // OrcaSlicer layer height pattern
+    // ==================== 层高解析（分开独立解析）====================
+    // layer_height - 标准层高
     private static final Pattern LAYER_HEIGHT_PATTERN = Pattern.compile(
-            "(?im)^\\s*;?\\s*(?:layer_height|layer_height_(?:first|initial)_layer)\\s*[:=]\\s*([0-9]+(?:\\.[0-9]+)?)");
+            "(?im)^\\s*;?\\s*layer_height\\s*[:=]\\s*([0-9]+(?:\\.[0-9]+)?)");
+    // first_layer_height - 首层层高
+    private static final Pattern FIRST_LAYER_HEIGHT_PATTERN = Pattern.compile(
+            "(?im)^\\s*;?\\s*first_layer_height\\s*[:=]\\s*([0-9]+(?:\\.[0-9]+)?)");
+    // initial_layer_print_height - 初始打印层高
+    private static final Pattern INITIAL_LAYER_PRINT_HEIGHT_PATTERN = Pattern.compile(
+            "(?im)^\\s*;?\\s*initial_layer_print_height\\s*[:=]\\s*([0-9]+(?:\\.[0-9]+)?)");
 
-    // Thumbnail pattern for base64 encoded images in G-code
+    // ==================== 缩略图解析 ====================
     private static final Pattern THUMBNAIL_START_PATTERN = Pattern.compile(
             "(?im)^\\s*;\\s*(?:thumbnail|thumbnail_JPG|thumbnail_PNG)\\s*(?:begin|start)");
     private static final Pattern THUMBNAIL_DATA_PATTERN = Pattern.compile(
@@ -65,66 +89,114 @@ public class GCodeParser {
     private static final Pattern THUMBNAIL_END_PATTERN = Pattern.compile(
             "(?im)^\\s*;\\s*(?:thumbnail|thumbnail_JPG|thumbnail_PNG)\\s*(?:end|stop)");
 
+    /**
+     * G-code 元数据
+     */
     @Data
     public static class GCodeMeta {
-        private Integer estTime = 0;
+        // 时间
+        private Integer estimatedPrintTimeSeconds = 0;
+
+        // 材料
         private String materialType;
+
+        // 喷嘴
         private BigDecimal nozzleSize;
         private BigDecimal lineWidth;
-        private BigDecimal filamentWeight;  // 耗材重量(g)
-        private BigDecimal filamentLength;  // 耗材长度(mm)
-        private Integer nozzleTemp;         // 喷头温度(℃)
-        private Integer bedTemp;            // 热床温度(℃)
-        private BigDecimal layerHeight;     // 层高(mm)
+
+        // 温度（区分首层和普通层）
+        private Integer nozzleTemp;              // nozzle_temperature
+        private Integer firstLayerNozzleTemp;    // nozzle_temperature_initial_layer
+        private Integer bedTemp;                 // bed_temperature
+        private Integer firstLayerBedTemp;       // first_layer_bed_temperature
+
+        // 层高（区分首层和普通层）
+        private BigDecimal layerHeight;          // layer_height
+        private BigDecimal firstLayerHeight;     // first_layer_height / initial_layer_print_height
+
+        // 统计信息
+        private Integer totalLayers;             // total layers count
+        private BigDecimal filamentCost;         // filament cost
+
+        // 耗材用量
+        private BigDecimal filamentUsedG;        // filament used [g]
+        private BigDecimal filamentUsedMM;       // filament used [mm]
+        private BigDecimal filamentUsedCM3;      // filament used [cm3]
+
+        // 兼容旧字段
+        private BigDecimal filamentWeight;       // 耗材重量(g) - 兼容
+        private BigDecimal filamentLength;       // 耗材长度(m) - 兼容
     }
 
+    /**
+     * 解析 G-code 元数据
+     * 解析顺序：explicit slicer header -> CONFIG_BLOCK -> fallback patterns
+     *
+     * @param content G-code 文件内容
+     * @return 解析后的元数据
+     */
     public static GCodeMeta parseMetadata(String content) {
         GCodeMeta meta = new GCodeMeta();
         if (content == null || content.isEmpty()) {
             return meta;
         }
 
-        meta.setEstTime(parseEstTime(content));
+        // 1. 解析时间（优先）
+        meta.setEstimatedPrintTimeSeconds(parsePrintTime(content));
 
-        Matcher matMatcher = MATERIAL_PATTERN.matcher(content);
-        if (matMatcher.find()) {
-            String normalizedMaterial = normalizeMaterial(matMatcher.group(1));
-            if (normalizedMaterial != null && !normalizedMaterial.isEmpty()) {
-                meta.setMaterialType(normalizedMaterial.toUpperCase());
-            }
-        }
+        // 2. 解析材料类型
+        parseMaterialType(content, meta);
 
+        // 3. 解析喷嘴直径
         meta.setNozzleSize(parseDecimal(content, NOZZLE_PATTERN));
+
+        // 4. 解析线宽
         meta.setLineWidth(parseDecimal(content, LINE_WIDTH_PATTERN));
 
-        // Parse filament weight (g) - try multiple patterns
-        BigDecimal weight = parseDecimal(content, FILAMENT_WEIGHT_ALT_PATTERN);
-        if (weight == null) {
-            weight = parseDecimal(content, FILAMENT_WEIGHT_PATTERN);
-        }
-        meta.setFilamentWeight(weight);
-
-        // Parse filament length (mm) - try multiple patterns
-        BigDecimal length = parseDecimal(content, FILAMENT_LENGTH_ALT_PATTERN);
-        if (length == null) {
-            length = parseDecimal(content, FILAMENT_LENGTH_PATTERN);
-        }
-        // Convert mm to meters if length is large (> 1000mm)
-        if (length != null && length.compareTo(new BigDecimal("1000")) > 0) {
-            length = length.divide(new BigDecimal("1000"), 2, java.math.RoundingMode.HALF_UP);
-        }
-        meta.setFilamentLength(length);
-
-        // Parse OrcaSlicer temperature values
+        // 5. 解析温度（分别解析，不合并正则）
         meta.setNozzleTemp(parseInteger(content, NOZZLE_TEMP_PATTERN));
+        meta.setFirstLayerNozzleTemp(parseInteger(content, NOZZLE_TEMP_INITIAL_LAYER_PATTERN));
         meta.setBedTemp(parseInteger(content, BED_TEMP_PATTERN));
+        meta.setFirstLayerBedTemp(parseInteger(content, BED_TEMP_FIRST_LAYER_PATTERN));
 
-        // Parse layer height
+        // 6. 解析层高（分别解析，不合并正则）
         meta.setLayerHeight(parseDecimal(content, LAYER_HEIGHT_PATTERN));
+        BigDecimal firstLayerHeight = parseDecimal(content, FIRST_LAYER_HEIGHT_PATTERN);
+        if (firstLayerHeight == null) {
+            firstLayerHeight = parseDecimal(content, INITIAL_LAYER_PRINT_HEIGHT_PATTERN);
+        }
+        meta.setFirstLayerHeight(firstLayerHeight);
+
+        // 7. 解析 OrcaSlicer 统计信息
+        meta.setTotalLayers(parseInteger(content, TOTAL_LAYERS_PATTERN));
+        meta.setFilamentCost(parseDecimal(content, FILAMENT_COST_PATTERN));
+        meta.setFilamentUsedMM(parseDecimal(content, FILAMENT_USED_MM_PATTERN));
+        meta.setFilamentUsedG(parseDecimal(content, FILAMENT_USED_G_PATTERN));
+        meta.setFilamentUsedCM3(parseDecimal(content, FILAMENT_USED_CM3_PATTERN));
+
+        // 8. 兼容旧版解析（fallback）
+        if (meta.getFilamentUsedG() == null) {
+            BigDecimal weight = parseDecimal(content, FILAMENT_WEIGHT_PATTERN);
+            meta.setFilamentWeight(weight);
+            meta.setFilamentUsedG(weight);
+        }
+
+        if (meta.getFilamentUsedMM() == null) {
+            BigDecimal lengthMm = parseDecimal(content, FILAMENT_LENGTH_PATTERN);
+            if (lengthMm != null && lengthMm.compareTo(new BigDecimal("1000")) > 0) {
+                // 转换为米
+                lengthMm = lengthMm.divide(new BigDecimal("1000"), 2, java.math.RoundingMode.HALF_UP);
+            }
+            meta.setFilamentLength(lengthMm);
+            meta.setFilamentUsedMM(lengthMm);
+        }
 
         return meta;
     }
 
+    /**
+     * 从文件名解析元数据（备选方案）
+     */
     public static GCodeMeta parseMetadataFromFilename(String filename) {
         GCodeMeta meta = new GCodeMeta();
         if (filename == null || filename.isBlank()) {
@@ -153,7 +225,7 @@ public class GCodeParser {
 
         Integer seconds = tryParseDurationText(timeToken);
         if (seconds != null && seconds > 0) {
-            meta.setEstTime(seconds);
+            meta.setEstimatedPrintTimeSeconds(seconds);
         }
 
         String material = normalizeMaterial(materialToken);
@@ -164,44 +236,21 @@ public class GCodeParser {
         return meta;
     }
 
-    private static BigDecimal parseDecimal(String content, Pattern pattern) {
-        Matcher matcher = pattern.matcher(content);
-        if (!matcher.find()) {
-            return null;
-        }
-        try {
-            return new BigDecimal(matcher.group(1));
-        } catch (Exception e) {
-            log.warn("Numeric parse failed: {}", matcher.group(1));
-            return null;
-        }
-    }
-
-    private static Integer parseInteger(String content, Pattern pattern) {
-        Matcher matcher = pattern.matcher(content);
-        if (!matcher.find()) {
-            return null;
-        }
-        try {
-            return Integer.parseInt(matcher.group(1));
-        } catch (NumberFormatException e) {
-            log.warn("Integer parse failed: {}", matcher.group(1));
-            return null;
-        }
-    }
-
-    private static Integer parseEstTime(String content) {
-        // Try TIME = seconds format
-        Matcher secondMatcher = TIME_SECONDS_PATTERN.matcher(content);
-        if (secondMatcher.find()) {
+    /**
+     * 解析打印时间（统一转换为秒）
+     */
+    private static Integer parsePrintTime(String content) {
+        // 1. TIME = seconds 格式
+        Matcher timeMatcher = TIME_SECONDS_PATTERN.matcher(content);
+        if (timeMatcher.find()) {
             try {
-                return Integer.parseInt(secondMatcher.group(1));
+                return Integer.parseInt(timeMatcher.group(1));
             } catch (NumberFormatException ignore) {
-                log.debug("TIME parse failed: {}", secondMatcher.group(1));
+                log.debug("TIME parse failed: {}", timeMatcher.group(1));
             }
         }
 
-        // Try estimated_time = seconds format (OrcaSlicer)
+        // 2. estimated_time = seconds 格式 (OrcaSlicer)
         Matcher estTimeMatcher = EST_TIME_PATTERN.matcher(content);
         if (estTimeMatcher.find()) {
             try {
@@ -211,8 +260,8 @@ public class GCodeParser {
             }
         }
 
-        // Try human-readable format: "estimated printing time = 1h 23m 45s"
-        Matcher textMatcher = TIME_TEXT_PATTERN.matcher(content);
+        // 3. human-readable 格式: "estimated printing time = 14m 5s" 或 "1h 23m"
+        Matcher textMatcher = EST_PRINTING_TIME_PATTERN.matcher(content);
         if (!textMatcher.find()) {
             return 0;
         }
@@ -227,11 +276,66 @@ public class GCodeParser {
         return 0;
     }
 
+    /**
+     * 解析材料类型
+     */
+    private static void parseMaterialType(String content, GCodeMeta meta) {
+        Matcher matMatcher = MATERIAL_PATTERN.matcher(content);
+        if (matMatcher.find()) {
+            String normalizedMaterial = normalizeMaterial(matMatcher.group(1));
+            if (normalizedMaterial != null && !normalizedMaterial.isEmpty()) {
+                meta.setMaterialType(normalizedMaterial.toUpperCase());
+            }
+        }
+    }
+
+    /**
+     * 解析数字（BigDecimal）
+     */
+    private static BigDecimal parseDecimal(String content, Pattern pattern) {
+        if (content == null || pattern == null) {
+            return null;
+        }
+        Matcher matcher = pattern.matcher(content);
+        if (!matcher.find()) {
+            return null;
+        }
+        try {
+            return new BigDecimal(matcher.group(1));
+        } catch (Exception e) {
+            log.warn("Numeric parse failed: {}", matcher.group(1));
+            return null;
+        }
+    }
+
+    /**
+     * 解析整数
+     */
+    private static Integer parseInteger(String content, Pattern pattern) {
+        if (content == null || pattern == null) {
+            return null;
+        }
+        Matcher matcher = pattern.matcher(content);
+        if (!matcher.find()) {
+            return null;
+        }
+        try {
+            return Integer.parseInt(matcher.group(1));
+        } catch (NumberFormatException e) {
+            log.warn("Integer parse failed: {}", matcher.group(1));
+            return null;
+        }
+    }
+
+    /**
+     * 解析时间文本（支持 14m 5s, 1h 23m, 3600 等格式）
+     */
     private static Integer tryParseDurationText(String raw) {
         if (raw == null || raw.isEmpty()) {
             return null;
         }
 
+        // 直接是数字（秒）
         if (raw.matches("\\d+")) {
             try {
                 return Integer.parseInt(raw);
@@ -240,6 +344,7 @@ public class GCodeParser {
             }
         }
 
+        // HH:MM:SS 或 HH:MM 格式
         Matcher hmsMatcher = DURATION_HMS_COLON_PATTERN.matcher(raw);
         if (hmsMatcher.matches()) {
             int part1 = Integer.parseInt(hmsMatcher.group(1));
@@ -251,26 +356,34 @@ public class GCodeParser {
             return part1 * 3600 + part2 * 60 + Integer.parseInt(part3);
         }
 
+        // 文本格式: 1h 23m 45s / 14m 5s / 1h 30m
         Matcher tokenMatcher = DURATION_TOKEN_PATTERN.matcher(raw);
         int total = 0;
         int found = 0;
         while (tokenMatcher.find()) {
             found++;
-            int num = Integer.parseInt(tokenMatcher.group(1));
-            char unit = Character.toLowerCase(tokenMatcher.group(2).charAt(0));
-            if (unit == 'd') {
-                total += num * 86400;
-            } else if (unit == 'h') {
-                total += num * 3600;
-            } else if (unit == 'm') {
-                total += num * 60;
-            } else if (unit == 's') {
-                total += num;
+            try {
+                int num = Integer.parseInt(tokenMatcher.group(1));
+                char unit = Character.toLowerCase(tokenMatcher.group(2).charAt(0));
+                if (unit == 'd') {
+                    total += num * 86400;
+                } else if (unit == 'h') {
+                    total += num * 3600;
+                } else if (unit == 'm') {
+                    total += num * 60;
+                } else if (unit == 's') {
+                    total += num;
+                }
+            } catch (NumberFormatException ignore) {
+                // 忽略解析失败的单个 token
             }
         }
         return found > 0 ? total : null;
     }
 
+    /**
+     * 标准化材料类型
+     */
     private static String normalizeMaterial(String raw) {
         if (raw == null) {
             return null;
@@ -285,7 +398,8 @@ public class GCodeParser {
         String[] tokens = value.split("[;,]");
         for (String token : tokens) {
             String item = token == null ? "" : token.trim();
-            if ((item.startsWith("\"") && item.endsWith("\"")) || (item.startsWith("'") && item.endsWith("'"))) {
+            if ((item.startsWith("\"") && item.endsWith("\""))
+                    || (item.startsWith("'") && item.endsWith("'"))) {
                 if (item.length() > 1) {
                     item = item.substring(1, item.length() - 1).trim();
                 }
@@ -297,6 +411,9 @@ public class GCodeParser {
         return null;
     }
 
+    /**
+     * 去除文件扩展名
+     */
     private static String stripExtension(String filename) {
         int slash = Math.max(filename.lastIndexOf('/'), filename.lastIndexOf('\\'));
         String name = slash >= 0 ? filename.substring(slash + 1) : filename;
