@@ -56,4 +56,11 @@ public class Result<T> {
     public static <T> Result<T> failed(ResultCode errorCode) {
         return new Result<>(errorCode.getCode(), errorCode.getMessage(), null);
     }
+
+    /**
+     * 失败返回结果 (自定义状态码和提示)
+     */
+    public static <T> Result<T> failed(long code, String message) {
+        return new Result<>(code, message, null);
+    }
 }

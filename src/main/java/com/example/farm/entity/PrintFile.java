@@ -63,6 +63,15 @@ public class PrintFile {
     @Schema(description = "耗材预估长度（米）")
     private BigDecimal filamentLength;
 
+    @Schema(description = "喷头温度（℃）")
+    private Integer nozzleTemp;
+
+    @Schema(description = "热床温度（℃）")
+    private Integer bedTemp;
+
+    @Schema(description = "层高（mm）")
+    private BigDecimal layerHeight;
+
     @TableField(exist = false)
     @Schema(description = "打印总次数（非持久化字段，通过统计计算）")
     private Integer printCount;

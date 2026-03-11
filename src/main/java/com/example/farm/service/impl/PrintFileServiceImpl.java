@@ -184,6 +184,11 @@ public class PrintFileServiceImpl extends ServiceImpl<PrintFileMapper, PrintFile
         printFile.setFilamentWeight(meta.getFilamentWeight());
         printFile.setFilamentLength(meta.getFilamentLength());
 
+        // 设置温度和层高（OrcaSlicer 解析）
+        printFile.setNozzleTemp(meta.getNozzleTemp());
+        printFile.setBedTemp(meta.getBedTemp());
+        printFile.setLayerHeight(meta.getLayerHeight());
+
         // 提取并上传缩略图
         try {
             String thumbnailBase64 = GCodeParser.extractThumbnailBase64(metaContent);

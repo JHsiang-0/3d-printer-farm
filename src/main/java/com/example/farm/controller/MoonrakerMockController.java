@@ -5,6 +5,9 @@ import com.example.farm.entity.PrintFile;
 import com.example.farm.entity.dto.PrintJobCreateDTO;
 import com.example.farm.service.PrintFileService;
 import com.example.farm.service.PrintJobService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -25,6 +28,7 @@ import java.util.Map;
 @Slf4j
 @RestController
 @RequiredArgsConstructor
+@Tag(name = "Moonraker 模拟接口", description = "兼容 OrcaSlicer 等切片软件的 API 模拟服务")
 public class MoonrakerMockController {
 
     private final PrintFileService printFileService;
@@ -50,6 +54,7 @@ public class MoonrakerMockController {
      * 获取 Moonraker 服务器信息
      * GET /server/info
      */
+    @Operation(summary = "获取服务器信息", description = "返回 Moonraker 服务器版本信息")
     @GetMapping("/server/info")
     public Map<String, Object> getServerInfo(@RequestHeader(value = "X-Api-Key", required = false) String apiKey) {
         validateApiKey(apiKey);
@@ -71,6 +76,7 @@ public class MoonrakerMockController {
      * 获取打印机信息
      * GET /printer/info
      */
+    @Operation(summary = "获取打印机信息", description = "返回打印机当前状态信息")
     @GetMapping("/printer/info")
     public Map<String, Object> getPrinterInfo(@RequestHeader(value = "X-Api-Key", required = false) String apiKey) {
         validateApiKey(apiKey);
@@ -92,6 +98,7 @@ public class MoonrakerMockController {
      * GET /machine/update/status
      * 返回空版本信息避免 Slicer 轮询报错
      */
+    @Operation(summary = "获取机器更新状态", description = "返回空的版本信息，避免切片软件轮询报错")
     @GetMapping("/machine/update/status")
     public Map<String, Object> getMachineUpdateStatus(@RequestHeader(value = "X-Api-Key", required = false) String apiKey) {
         validateApiKey(apiKey);
@@ -115,11 +122,12 @@ public class MoonrakerMockController {
      * @param apiKey API Key
      * @return Moonraker 格式的响应
      */
+    @Operation(summary = "上传 G-code 文件", description = "接收切片软件上传的 G-code 文件，自动解析并上传到存储服务")
     @PostMapping("/server/files/upload")
     public Map<String, Object> uploadFile(
-            @RequestParam("file") MultipartFile file,
-            @RequestParam(value = "print", required = false, defaultValue = "false") Boolean print,
-            @RequestHeader(value = "X-Api-Key", required = false) String apiKey) {
+            @Parameter(description = "上传的 G-code 文件") @RequestParam("file") MultipartFile file,
+            @Parameter(description = "是否立即创建打印任务") @RequestParam(value = "print", required = false, defaultValue = "false") Boolean print,
+            @Parameter(description = "API Key 认证") @RequestHeader(value = "X-Api-Key", required = false) String apiKey) {
 
         validateApiKey(apiKey);
 
@@ -172,6 +180,7 @@ public class MoonrakerMockController {
      * 获取文件列表
      * GET /server/files
      */
+    @Operation(summary = "获取文件列表", description = "返回已上传的 G-code 文件列表")
     @GetMapping("/server/files")
     public Map<String, Object> getFileList(
             @RequestHeader(value = "X-Api-Key", required = false) String apiKey) {
@@ -187,10 +196,11 @@ public class MoonrakerMockController {
      * 删除文件
      * DELETE /server/files/{filename}
      */
+    @Operation(summary = "删除 G-code 文件", description = "根据文件名删除指定的 G-code 文件")
     @DeleteMapping("/server/files/{filename:.+}")
     public Map<String, Object> deleteFile(
-            @PathVariable String filename,
-            @RequestHeader(value = "X-Api-Key", required = false) String apiKey) {
+            @Parameter(description = "要删除的文件名") @PathVariable String filename,
+            @Parameter(description = "API Key 认证") @RequestHeader(value = "X-Api-Key", required = false) String apiKey) {
 
         validateApiKey(apiKey);
 

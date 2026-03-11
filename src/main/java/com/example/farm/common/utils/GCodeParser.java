@@ -11,8 +11,9 @@ import java.util.regex.Pattern;
 public class GCodeParser {
 
     private static final Pattern TIME_SECONDS_PATTERN = Pattern.compile("(?im)^\\s*;?\\s*TIME\\s*[:=]\\s*(\\d+)\\s*$");
+    private static final Pattern EST_TIME_PATTERN = Pattern.compile("(?im)^\\s*;?\\s*estimated_time\\s*[:=]\\s*(\\d+)\\s*$");
     private static final Pattern TIME_TEXT_PATTERN = Pattern.compile(
-            "(?im)^\\s*;?\\s*(?:estimated printing time(?:\\s*\\([^)]*\\))?|total estimated time)\\s*[:=]\\s*([^\\r\\n]+)");
+            "(?im)^\\s*;?\\s*(?:estimated printing time(?:\\s*\\([^)]*\\))?|total estimated time|estimated time)\\s*[:=]\\s*([^\\r\\n]+)");
     private static final Pattern DURATION_TOKEN_PATTERN = Pattern.compile("(?i)(\\d+)\\s*([dhms])");
     private static final Pattern DURATION_HMS_COLON_PATTERN = Pattern.compile("^(\\d{1,2}):(\\d{1,2})(?::(\\d{1,2}))?$");
     private static final Pattern MATERIAL_TOKEN_PATTERN = Pattern.compile("(?i)^[a-z][a-z0-9+\\-_.]*$");
@@ -46,6 +47,16 @@ public class GCodeParser {
     private static final Pattern FILAMENT_LENGTH_ALT_PATTERN = Pattern.compile(
             "(?im)^\\s*;?\\s*filament used\\s*\\[mm\\]\\s*[:=]\\s*([0-9]+(?:\\.[0-9]+)?)");
 
+    // OrcaSlicer temperature patterns
+    private static final Pattern NOZZLE_TEMP_PATTERN = Pattern.compile(
+            "(?im)^\\s*;?\\s*nozzle_temperature(?:_initial|_first_layer)?\\s*[:=]\\s*(\\d+)");
+    private static final Pattern BED_TEMP_PATTERN = Pattern.compile(
+            "(?im)^\\s*;?\\s*bed_temperature(?:_initial|_first_layer)?\\s*[:=]\\s*(\\d+)");
+
+    // OrcaSlicer layer height pattern
+    private static final Pattern LAYER_HEIGHT_PATTERN = Pattern.compile(
+            "(?im)^\\s*;?\\s*(?:layer_height|layer_height_(?:first|initial)_layer)\\s*[:=]\\s*([0-9]+(?:\\.[0-9]+)?)");
+
     // Thumbnail pattern for base64 encoded images in G-code
     private static final Pattern THUMBNAIL_START_PATTERN = Pattern.compile(
             "(?im)^\\s*;\\s*(?:thumbnail|thumbnail_JPG|thumbnail_PNG)\\s*(?:begin|start)");
@@ -62,6 +73,9 @@ public class GCodeParser {
         private BigDecimal lineWidth;
         private BigDecimal filamentWeight;  // 耗材重量(g)
         private BigDecimal filamentLength;  // 耗材长度(mm)
+        private Integer nozzleTemp;         // 喷头温度(℃)
+        private Integer bedTemp;            // 热床温度(℃)
+        private BigDecimal layerHeight;     // 层高(mm)
     }
 
     public static GCodeMeta parseMetadata(String content) {
@@ -100,6 +114,13 @@ public class GCodeParser {
             length = length.divide(new BigDecimal("1000"), 2, java.math.RoundingMode.HALF_UP);
         }
         meta.setFilamentLength(length);
+
+        // Parse OrcaSlicer temperature values
+        meta.setNozzleTemp(parseInteger(content, NOZZLE_TEMP_PATTERN));
+        meta.setBedTemp(parseInteger(content, BED_TEMP_PATTERN));
+
+        // Parse layer height
+        meta.setLayerHeight(parseDecimal(content, LAYER_HEIGHT_PATTERN));
 
         return meta;
     }
@@ -156,7 +177,21 @@ public class GCodeParser {
         }
     }
 
+    private static Integer parseInteger(String content, Pattern pattern) {
+        Matcher matcher = pattern.matcher(content);
+        if (!matcher.find()) {
+            return null;
+        }
+        try {
+            return Integer.parseInt(matcher.group(1));
+        } catch (NumberFormatException e) {
+            log.warn("Integer parse failed: {}", matcher.group(1));
+            return null;
+        }
+    }
+
     private static Integer parseEstTime(String content) {
+        // Try TIME = seconds format
         Matcher secondMatcher = TIME_SECONDS_PATTERN.matcher(content);
         if (secondMatcher.find()) {
             try {
@@ -166,6 +201,17 @@ public class GCodeParser {
             }
         }
 
+        // Try estimated_time = seconds format (OrcaSlicer)
+        Matcher estTimeMatcher = EST_TIME_PATTERN.matcher(content);
+        if (estTimeMatcher.find()) {
+            try {
+                return Integer.parseInt(estTimeMatcher.group(1));
+            } catch (NumberFormatException ignore) {
+                log.debug("estimated_time parse failed: {}", estTimeMatcher.group(1));
+            }
+        }
+
+        // Try human-readable format: "estimated printing time = 1h 23m 45s"
         Matcher textMatcher = TIME_TEXT_PATTERN.matcher(content);
         if (!textMatcher.find()) {
             return 0;

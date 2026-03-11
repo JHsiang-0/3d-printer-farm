@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 打印文件管理接口。
@@ -84,10 +85,12 @@ public class PrintFileController {
 
     /**
      * 批量删除文件。
+     * 请求格式: {"ids": [1, 2, 3]}
      */
     @Operation(summary = "批量删除文件")
     @DeleteMapping("/batch")
-    public Result<Void> batchDeleteFiles(@RequestBody List<Long> ids) {
+    public Result<Void> batchDeleteFiles(@RequestBody Map<String, List<Long>> request) {
+        List<Long> ids = request.get("ids");
         if (ids == null || ids.isEmpty()) {
             throw new BusinessException("请选择要删除的文件");
         }

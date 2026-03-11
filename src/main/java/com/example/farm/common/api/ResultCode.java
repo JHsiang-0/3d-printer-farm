@@ -12,7 +12,13 @@ public enum ResultCode {
 
     // 你可以在这里继续追加农场相关的业务状态码
     PRINTER_OFFLINE(10001, "打印机离线"),
-    PRINTER_BUSY(10002, "打印机正忙");
+    PRINTER_BUSY(10002, "打印机正忙"),
+
+    // 中间件错误码 (5xxx)
+    MYSQL_ERROR(5001, "数据库连接异常"),
+    REDIS_ERROR(5002, "缓存服务异常"),
+    STORAGE_ERROR(5003, "存储服务异常"),
+    NETWORK_ERROR(5004, "网络连接异常");
 
     private final long code;
     private final String message;
