@@ -95,3 +95,5 @@ server:
 farm:
   websocket:
     max-connections: 1000
+  # Moonraker API 模拟器配置（切片软件连接密钥）
+  moonraker-api-key: ${MOONRAKER_API_KEY:}

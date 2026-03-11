@@ -40,6 +40,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/auth/admin/**").hasRole("ADMIN")
                         .requestMatchers("/ws/**").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
+                        // Moonraker API 模拟器（OrcaSlicer 等切片软件）
+                        .requestMatchers("/server/**", "/printer/**", "/machine/**").permitAll()
                         .anyRequest().authenticated()
                 );
 
