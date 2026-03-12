@@ -57,29 +57,44 @@ public class GCodeParser {
             "(?im)^\\s*;?\\s*(?:line_width|default_line_width|outer_wall_line_width|inner_wall_line_width|wall_line_width|perimeter_line_width|external_perimeter_line_width)\\s*[:=]\\s*\\[?\\s*([0-9]+(?:\\.[0-9]+)?)");
 
     // ==================== 温度解析（分开独立解析）====================
-    // nozzle_temperature - 喷头温度
+    // nozzle_temperature - 喷头温度（支持多种格式）
     private static final Pattern NOZZLE_TEMP_PATTERN = Pattern.compile(
-            "(?im)^\\s*;?\\s*nozzle_temperature\\s*[:=]\\s*(\\d+)");
+            "(?im)^\\s*;\\s*nozzle_temperature\\s*[:=]\\s*(\\d+)");
     // nozzle_temperature_initial_layer - 首层喷头温度
     private static final Pattern NOZZLE_TEMP_INITIAL_LAYER_PATTERN = Pattern.compile(
-            "(?im)^\\s*;?\\s*nozzle_temperature_initial_layer\\s*[:=]\\s*(\\d+)");
-    // bed_temperature - 热床温度
+            "(?im)^\\s*;\\s*nozzle_temperature_initial_layer\\s*[:=]\\s*(\\d+)");
+    // nozzle_temperature_first_layer - 首层喷头温度（备用）
+    private static final Pattern NOZZLE_TEMP_FIRST_LAYER_PATTERN = Pattern.compile(
+            "(?im)^\\s*;\\s*nozzle_temperature_first_layer\\s*[:=]\\s*(\\d+)");
+    // first_layer_temperature - 首层喷头温度（OrcaSlicer 备用）
+    private static final Pattern NOZZLE_TEMP_FIRST_LAYER_PATTERN2 = Pattern.compile(
+            "(?im)^\\s*;\\s*first_layer_temperature\\s*[:=]\\s*(\\d+)");
+    // bed_temperature - 热床温度（标准）
     private static final Pattern BED_TEMP_PATTERN = Pattern.compile(
-            "(?im)^\\s*;?\\s*bed_temperature\\s*[:=]\\s*(\\d+)");
+            "(?im)^\\s*;\\s*bed_temperature\\s*[:=]\\s*(\\d+)");
+    // hot_plate_temp - OrcaSlicer 热床温度
+    private static final Pattern BED_TEMP_PATTERN_ORCA = Pattern.compile(
+            "(?im)^\\s*;\\s*hot_plate_temp\\s*[:=]\\s*(\\d+)");
     // first_layer_bed_temperature - 首层热床温度
     private static final Pattern BED_TEMP_FIRST_LAYER_PATTERN = Pattern.compile(
-            "(?im)^\\s*;?\\s*first_layer_bed_temperature\\s*[:=]\\s*(\\d+)");
+            "(?im)^\\s*;\\s*first_layer_bed_temperature\\s*[:=]\\s*(\\d+)");
+    // bed_temperature_first_layer - 首层热床温度（备用）
+    private static final Pattern BED_TEMP_FIRST_LAYER_PATTERN2 = Pattern.compile(
+            "(?im)^\\s*;\\s*bed_temperature_first_layer\\s*[:=]\\s*(\\d+)");
+    // hot_plate_temp_initial_layer - OrcaSlicer 首层热床温度
+    private static final Pattern BED_TEMP_FIRST_LAYER_PATTERN_ORCA = Pattern.compile(
+            "(?im)^\\s*;\\s*hot_plate_temp_initial_layer\\s*[:=]\\s*(\\d+)");
 
     // ==================== 层高解析（分开独立解析）====================
     // layer_height - 标准层高
     private static final Pattern LAYER_HEIGHT_PATTERN = Pattern.compile(
-            "(?im)^\\s*;?\\s*layer_height\\s*[:=]\\s*([0-9]+(?:\\.[0-9]+)?)");
+            "(?im)^\\s*;\\s*layer_height\\s*[:=]\\s*([0-9]+(?:\\.[0-9]+)?)");
     // first_layer_height - 首层层高
     private static final Pattern FIRST_LAYER_HEIGHT_PATTERN = Pattern.compile(
-            "(?im)^\\s*;?\\s*first_layer_height\\s*[:=]\\s*([0-9]+(?:\\.[0-9]+)?)");
+            "(?im)^\\s*;\\s*first_layer_height\\s*[:=]\\s*([0-9]+(?:\\.[0-9]+)?)");
     // initial_layer_print_height - 初始打印层高
     private static final Pattern INITIAL_LAYER_PRINT_HEIGHT_PATTERN = Pattern.compile(
-            "(?im)^\\s*;?\\s*initial_layer_print_height\\s*[:=]\\s*([0-9]+(?:\\.[0-9]+)?)");
+            "(?im)^\\s*;\\s*initial_layer_print_height\\s*[:=]\\s*([0-9]+(?:\\.[0-9]+)?)");
 
     // ==================== 缩略图解析 ====================
     private static final Pattern THUMBNAIL_START_PATTERN = Pattern.compile(
@@ -153,11 +168,35 @@ public class GCodeParser {
         // 4. 解析线宽
         meta.setLineWidth(parseDecimal(content, LINE_WIDTH_PATTERN));
 
-        // 5. 解析温度（分别解析，不合并正则）
+        // 5. 解析温度（分别解析，尝试多个备用模式）
         meta.setNozzleTemp(parseInteger(content, NOZZLE_TEMP_PATTERN));
-        meta.setFirstLayerNozzleTemp(parseInteger(content, NOZZLE_TEMP_INITIAL_LAYER_PATTERN));
-        meta.setBedTemp(parseInteger(content, BED_TEMP_PATTERN));
-        meta.setFirstLayerBedTemp(parseInteger(content, BED_TEMP_FIRST_LAYER_PATTERN));
+
+        // 首层喷头温度：优先尝试 initial_layer，然后尝试 first_layer，最后尝试 OrcaSlicer 格式
+        Integer firstNozzleTemp = parseInteger(content, NOZZLE_TEMP_INITIAL_LAYER_PATTERN);
+        if (firstNozzleTemp == null) {
+            firstNozzleTemp = parseInteger(content, NOZZLE_TEMP_FIRST_LAYER_PATTERN);
+        }
+        if (firstNozzleTemp == null) {
+            firstNozzleTemp = parseInteger(content, NOZZLE_TEMP_FIRST_LAYER_PATTERN2);
+        }
+        meta.setFirstLayerNozzleTemp(firstNozzleTemp);
+
+        // 热床温度：优先标准格式，然后尝试 OrcaSlicer 格式
+        Integer bedTemp = parseInteger(content, BED_TEMP_PATTERN);
+        if (bedTemp == null) {
+            bedTemp = parseInteger(content, BED_TEMP_PATTERN_ORCA);
+        }
+        meta.setBedTemp(bedTemp);
+
+        // 首层热床温度：优先 first_layer_bed_temperature，然后尝试 bed_temperature_first_layer，最后尝试 OrcaSlicer 格式
+        Integer firstBedTemp = parseInteger(content, BED_TEMP_FIRST_LAYER_PATTERN);
+        if (firstBedTemp == null) {
+            firstBedTemp = parseInteger(content, BED_TEMP_FIRST_LAYER_PATTERN2);
+        }
+        if (firstBedTemp == null) {
+            firstBedTemp = parseInteger(content, BED_TEMP_FIRST_LAYER_PATTERN_ORCA);
+        }
+        meta.setFirstLayerBedTemp(firstBedTemp);
 
         // 6. 解析层高（分别解析，不合并正则）
         meta.setLayerHeight(parseDecimal(content, LAYER_HEIGHT_PATTERN));

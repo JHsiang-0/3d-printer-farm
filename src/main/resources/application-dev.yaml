@@ -10,8 +10,8 @@ spring:
   # 开发环境数据源配置
   datasource:
     url: jdbc:mysql://localhost:3306/farm?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
-    username: root
-    password: root
+    username: farm
+    password: YBW5esRQwm4fm3X2
     hikari:
       pool-name: FarmHikariPool-Dev
       # 开发环境使用较小的连接池
@@ -26,7 +26,7 @@ spring:
     redis:
       host: localhost
       port: 6379
-      password:
+      password: redis_ZSeBDY
       database: 0
       timeout: 5s
       lettuce:
@@ -39,20 +39,21 @@ spring:
 # RustFS开发环境配置
 rustfs:
   endpoint: http://127.0.0.1:9000
-  access-key: admin
-  secret-key: admin
+  access-key: rustfsadmin
+  secret-key: rustfsadmin_fzSNXB
 # 开发环境日志配置 - 更详细的日志输出
 logging:
   level:
     root: INFO
-    com.example.farm: DEBUG
-    com.example.farm.mapper: DEBUG  # 打印SQL语句
-    com.example.farm.task: DEBUG
+    com.example.farm: warn
+    com.example.farm.mapper: warn  # 打印SQL语句
+    com.example.farm.task: WARN
     org.springframework.web: DEBUG
-    org.springframework.web.socket: DEBUG
+    org.springframework.web.socket: warn
     org.apache.ibatis: DEBUG
     io.lettuce.core: INFO
     com.zaxxer.hikari: DEBUG
+    org.springframework.web.client: WARN  # 屏蔽 WebClient REST 调用日志
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %highlight(%-5level) [%thread] %cyan(%logger{36}) - %msg%n"
 

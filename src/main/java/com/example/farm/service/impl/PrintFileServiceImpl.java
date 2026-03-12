@@ -109,62 +109,40 @@ public class PrintFileServiceImpl extends ServiceImpl<PrintFileMapper, PrintFile
         }
         String safeName = System.currentTimeMillis() + "_" + originalName;
 
-        GCodeParser.GCodeMeta filenameMeta = GCodeParser.parseMetadataFromFilename(originalName);
-        boolean filenameHit = hasUsableMeta(filenameMeta);
+        // 统一从完整文件解析
+        String fullContent = extractFullContentIfAffordable(file);
+        GCodeParser.GCodeMeta meta;
+        String parseSource;
 
-        String metaContent = extractHeadAndTail(file);
-        GCodeParser.GCodeMeta contentMeta = GCodeParser.parseMetadata(metaContent);
-        boolean headTailHit = hasUsableMeta(contentMeta);
-        boolean deepTailTriggered = false;
-        boolean deepTailHit = false;
-        if (!headTailHit) {
-            deepTailTriggered = true;
-            String deepTailContent = extractTail(file, DEEP_TAIL_SAMPLE_SIZE);
-            if (!deepTailContent.isEmpty()) {
-                contentMeta = GCodeParser.parseMetadata(deepTailContent);
-                deepTailHit = hasUsableMeta(contentMeta);
-            }
+        if (!fullContent.isEmpty()) {
+            // 完整文件解析
+            meta = GCodeParser.parseMetadata(fullContent);
+            parseSource = "full-file";
+        } else if (file.getSize() > FULL_PARSE_MAX_BYTES) {
+            // 文件太大，只解析头部
+            String headTail = extractHeadAndTail(file);
+            meta = GCodeParser.parseMetadata(headTail);
+            parseSource = "head-tail (skipped large file)";
+        } else {
+            // 回退到头部解析
+            String headTail = extractHeadAndTail(file);
+            meta = GCodeParser.parseMetadata(headTail);
+            parseSource = "head-tail";
         }
 
-        boolean fullFallbackTriggered = false;
-        boolean fullFallbackHit = false;
-        boolean fullFallbackSkippedBySize = false;
-        if (!headTailHit && !deepTailHit) {
-            fullFallbackTriggered = true;
-            String fullContent = extractFullContentIfAffordable(file);
-            if (!fullContent.isEmpty()) {
-                contentMeta = GCodeParser.parseMetadata(fullContent);
-                fullFallbackHit = hasUsableMeta(contentMeta);
-            } else {
-                fullFallbackSkippedBySize = file.getSize() > FULL_PARSE_MAX_BYTES;
-            }
-        }
+        // 提取缩略图（从头部）
+        String headTailForThumb = extractHeadAndTail(file);
 
-        GCodeParser.GCodeMeta meta = new GCodeParser.GCodeMeta();
-        meta.setEstTime((filenameMeta.getEstTime() != null && filenameMeta.getEstTime() > 0)
-                ? filenameMeta.getEstTime()
-                : contentMeta.getEstTime());
-        meta.setMaterialType(isNotBlank(filenameMeta.getMaterialType())
-                ? filenameMeta.getMaterialType()
-                : contentMeta.getMaterialType());
-        meta.setNozzleSize(contentMeta.getNozzleSize());
-        meta.setLineWidth(contentMeta.getLineWidth());
+        log.info("gcode 解析: file={}, source={}, time={}, material={}, nozzle={}, temp={}, bedTemp={}, layerHeight={}, filamentWeight={}, filamentLength={}, filamentUsedG={}, filamentUsedMM={}, firstLayerBedTemp={}, nozzleSizeFromGcode={}",
+                originalName, parseSource, meta.getEstimatedPrintTimeSeconds(), meta.getMaterialType(), meta.getNozzleSize(),
+                meta.getNozzleTemp(), meta.getBedTemp(), meta.getLayerHeight(),
+                meta.getFilamentWeight(), meta.getFilamentLength(),
+                meta.getFilamentUsedG(), meta.getFilamentUsedMM(),
+                meta.getFirstLayerBedTemp(), meta.getNozzleSize());
 
-        String materialSource = isNotBlank(filenameMeta.getMaterialType())
-                ? "filename"
-                : (isNotBlank(contentMeta.getMaterialType())
-                ? (fullFallbackTriggered ? "full-file" : (deepTailTriggered ? "deep-tail" : "head-tail"))
-                : "default");
-        String estTimeSource = (filenameMeta.getEstTime() != null && filenameMeta.getEstTime() > 0)
-                ? "filename"
-                : ((contentMeta.getEstTime() != null && contentMeta.getEstTime() > 0)
-                ? (fullFallbackTriggered ? "full-file" : (deepTailTriggered ? "deep-tail" : "head-tail"))
-                : "default");
-
-        log.info("gcode meta parse path: userId={}, file={}, filenameHit={}, headTailHit={}, deepTailTriggered={}, deepTailHit={}, fullFallbackTriggered={}, fullFallbackHit={}, fullFallbackSkippedBySize={}, fileSize={}, materialSource={}, estTimeSource={}",
-                userId, originalName, filenameHit, headTailHit, deepTailTriggered, deepTailHit, fullFallbackTriggered, fullFallbackHit, fullFallbackSkippedBySize, file.getSize(), materialSource, estTimeSource);
-        log.info("切片元数据解析结果: userId={}, 文件={}, 预计耗时(s)={}, 喷嘴={}, 线宽={}, 材料={}",
-                userId, originalName, meta.getEstTime(), meta.getNozzleSize(), meta.getLineWidth(), meta.getMaterialType());
+        // 调试：打印耗材字段原始值
+        log.debug("耗材调试 - filamentUsedG={}, filamentUsedMM={}, filamentWeight={}, filamentLength={}",
+                meta.getFilamentUsedG(), meta.getFilamentUsedMM(), meta.getFilamentWeight(), meta.getFilamentLength());
 
         String fileUrl = rustFsClient.uploadFile(safeName, file);
 
@@ -176,22 +154,42 @@ public class PrintFileServiceImpl extends ServiceImpl<PrintFileMapper, PrintFile
         printFile.setUserId(userId);
         printFile.setCreatedAt(LocalDateTime.now());
 
-        printFile.setEstTime(meta.getEstTime());
+        printFile.setEstTime(meta.getEstimatedPrintTimeSeconds());
         printFile.setMaterialType(meta.getMaterialType() != null ? meta.getMaterialType() : "PLA");
         printFile.setNozzleSize(meta.getNozzleSize() != null ? meta.getNozzleSize() : new BigDecimal("0.40"));
 
-        // 设置耗材重量和长度（长度已从 mm 转换为 m）
-        printFile.setFilamentWeight(meta.getFilamentWeight());
-        printFile.setFilamentLength(meta.getFilamentLength());
+        // 设置耗材重量和长度
+        // filamentUsedG 单位是克，直接使用
+        // filamentUsedMM 是 mm，需要转换为米
+        BigDecimal filamentWeight = meta.getFilamentUsedG();
+        if (filamentWeight == null && meta.getFilamentWeight() != null) {
+            filamentWeight = meta.getFilamentWeight();
+        }
+        printFile.setFilamentWeight(filamentWeight);
+
+        BigDecimal filamentLength = meta.getFilamentUsedMM();
+        if (filamentLength != null && filamentLength.compareTo(BigDecimal.ZERO) > 0) {
+            // 转换为米（原始数据是 mm）
+            if (filamentLength.compareTo(new BigDecimal("1000")) > 0) {
+                filamentLength = filamentLength.divide(new BigDecimal("1000"), 2, java.math.RoundingMode.HALF_UP);
+            }
+        }
+        if (filamentLength == null && meta.getFilamentLength() != null) {
+            filamentLength = meta.getFilamentLength();
+        }
+        printFile.setFilamentLength(filamentLength);
 
         // 设置温度和层高（OrcaSlicer 解析）
         printFile.setNozzleTemp(meta.getNozzleTemp());
         printFile.setBedTemp(meta.getBedTemp());
         printFile.setLayerHeight(meta.getLayerHeight());
+        printFile.setFirstLayerNozzleTemp(meta.getFirstLayerNozzleTemp());
+        printFile.setFirstLayerBedTemp(meta.getFirstLayerBedTemp());
+        printFile.setFirstLayerHeight(meta.getFirstLayerHeight());
 
         // 提取并上传缩略图
         try {
-            String thumbnailBase64 = GCodeParser.extractThumbnailBase64(metaContent);
+            String thumbnailBase64 = GCodeParser.extractThumbnailBase64(headTailForThumb);
             if (thumbnailBase64 != null && !thumbnailBase64.isEmpty()) {
                 String thumbnailUrl = uploadThumbnailToRustFS(thumbnailBase64, safeName);
                 if (thumbnailUrl != null) {
@@ -363,7 +361,7 @@ public class PrintFileServiceImpl extends ServiceImpl<PrintFileMapper, PrintFile
             return false;
         }
         boolean hasMaterial = isNotBlank(meta.getMaterialType());
-        boolean hasTime = meta.getEstTime() != null && meta.getEstTime() > 0;
+        boolean hasTime = meta.getEstimatedPrintTimeSeconds() != null && meta.getEstimatedPrintTimeSeconds() > 0;
         return hasMaterial || hasTime;
     }
 

@@ -72,6 +72,15 @@ public class PrintFile {
     @Schema(description = "层高（mm）")
     private BigDecimal layerHeight;
 
+    @Schema(description = "首层喷头温度（℃）")
+    private Integer firstLayerNozzleTemp;
+
+    @Schema(description = "首层热床温度（℃）")
+    private Integer firstLayerBedTemp;
+
+    @Schema(description = "首层层高（mm）")
+    private BigDecimal firstLayerHeight;
+
     @TableField(exist = false)
     @Schema(description = "打印总次数（非持久化字段，通过统计计算）")
     private Integer printCount;
