@@ -59,6 +59,13 @@ public class PrintJob implements Serializable {
     private Long userId;
 
     /**
+     * 现场操作员 ID（确认安全、启动打印时记录）
+     */
+    @TableField("operator_id")
+    @Schema(description = "现场操作员ID（确认安全、启动打印时记录）")
+    private Long operatorId;
+
+    /**
      * 排队优先级（数值越高越优先）
      */
     @TableField("priority")
@@ -66,10 +73,10 @@ public class PrintJob implements Serializable {
     private Integer priority;
 
     /**
-     * 任务状态：QUEUED, ASSIGNED, PRINTING, COMPLETED, FAILED, CANCELED
+     * 任务状态：PENDING, ASSIGNED, PRINTING, COMPLETED, FAILED
      */
     @TableField("status")
-    @Schema(description = "任务状态：QUEUED, ASSIGNED, PRINTING, COMPLETED, FAILED, CANCELED")
+    @Schema(description = "任务状态：PENDING, ASSIGNED, PRINTING, COMPLETED, FAILED")
     private String status;
 
     /**
@@ -113,32 +120,4 @@ public class PrintJob implements Serializable {
     @TableField("updated_at")
     @Schema(description = "更新时间")
     private LocalDateTime updatedAt;
-
-    /**
-     * RustFS 中的文件访问地址
-     */
-    @TableField("file_url")
-    @Schema(description = "RustFS中的文件访问地址")
-    private String fileUrl;
-
-    /**
-     * 预计打印耗时（秒）
-     */
-    @TableField("est_time")
-    @Schema(description = "预计打印耗时（秒）")
-    private Integer estTime;
-
-    /**
-     * 要求耗材类型 (如 PLA, PETG, ABS)
-     */
-    @TableField("material_type")
-    @Schema(description = "要求耗材类型 (如 PLA, PETG, ABS)")
-    private String materialType;
-
-    /**
-     * 要求喷嘴直径 (如 0.40, 0.60)
-     */
-    @TableField("nozzle_size")
-    @Schema(description = "要求喷嘴直径 (如 0.40, 0.60)")
-    private java.math.BigDecimal nozzleSize;
 }

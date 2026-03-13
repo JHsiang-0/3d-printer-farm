@@ -27,6 +27,27 @@ public class PrintFile {
     @Schema(description = "主键ID")
     private Long id;
 
+    /**
+     * 父目录 ID（NULL 表示根目录）
+     */
+    @TableField("parent_id")
+    @Schema(description = "父目录ID（NULL表示根目录）")
+    private Long parentId;
+
+    /**
+     * 是否为文件夹（0-文件，1-文件夹）
+     */
+    @TableField("is_folder")
+    @Schema(description = "是否为文件夹（0-文件，1-文件夹）")
+    private Boolean isFolder;
+
+    /**
+     * 对象存储真实路径（如 farm/uploads/xxx.gcode）
+     */
+    @TableField("rustfs_key")
+    @Schema(description = "对象存储真实路径")
+    private String rustfsKey;
+
     @Schema(description = "原始文件名")
     private String originalName;
 

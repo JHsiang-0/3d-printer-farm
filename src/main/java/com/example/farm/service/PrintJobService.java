@@ -58,4 +58,44 @@ public interface PrintJobService extends IService<PrintJob> {
      * @throws BusinessException 当任务状态、设备状态或工艺参数校验不通过时抛出
      */
     boolean assignAndStartPrint(Long jobId, Long printerId);
+
+    // =============================================
+    // 安全打印流转核心方法（现场确认模式）
+    // =============================================
+
+    /**
+     * 后台派发任务（两步式安全打印的第一步）
+     * - 校验：Job 必须处于 PENDING 状态
+     * - 行为：将 Job 的 printerId 设为目标机器，状态改为 ASSIGNED
+     * - 行为：将目标 Printer 的 is_safe_to_print 重置为 false（防范风险）
+     *
+     * @param jobId     任务 ID
+     * @param printerId 目标打印机 ID
+     * @throws BusinessException 当任务状态非法或打印机不存在时抛出
+     */
+    void assignJob(Long jobId, Long printerId);
+
+    /**
+     * 现场确认打印机热床已清理安全（两步式安全打印的第二步之一）
+     * - 行为：操作员在现场清理完热床后调用。将 Printer 的 is_safe_to_print 设为 true
+     *
+     * @param printerId  打印机 ID
+     * @param operatorId 操作员 ID（可选，从安全上下文获取）
+     * @throws BusinessException 当打印机不存在时抛出
+     */
+    void confirmPrinterSafe(Long printerId, Long operatorId);
+
+    /**
+     * 现场启动打印（两步式安全打印的第二步之二）
+     * - 校验 1：Job 必须处于 ASSIGNED 状态
+     * - 校验 2：关联的 Printer 的 is_safe_to_print 必须为 true，否则抛出业务异常"热床未确认安全，禁止打印"
+     * - 行为：将 Job 状态改为 PRINTING，记录传入的 operatorId
+     * - 行为：调用 Moonraker 接口发送打印指令
+     * - 行为：将 Printer 的 is_safe_to_print 再次置为 false，状态改为 PRINTING
+     *
+     * @param jobId      任务 ID
+     * @param operatorId 操作员 ID（必填，记录谁启动了打印）
+     * @throws BusinessException 当状态校验不通过或 Moonraker 调用失败时抛出
+     */
+    void startPrint(Long jobId, Long operatorId);
 }

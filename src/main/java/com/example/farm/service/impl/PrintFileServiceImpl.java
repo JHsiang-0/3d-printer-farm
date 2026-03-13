@@ -40,6 +40,56 @@ public class PrintFileServiceImpl extends ServiceImpl<PrintFileMapper, PrintFile
     private final RustFsClient rustFsClient;
 
     @Override
+    public List<PrintFile> getFolderContent(Long parentId) {
+        // parentId 为 NULL 时查询根目录（parent_id IS NULL）
+        LambdaQueryWrapper<PrintFile> wrapper = new LambdaQueryWrapper<>();
+        if (parentId == null) {
+            wrapper.isNull(PrintFile::getParentId);
+        } else {
+            wrapper.eq(PrintFile::getParentId, parentId);
+        }
+        // 文件夹排在前面，文件按创建时间倒序
+        wrapper.orderByAsc(PrintFile::getIsFolder)
+                .orderByDesc(PrintFile::getCreatedAt);
+        return this.list(wrapper);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public PrintFile createFolder(Long parentId, String folderName) {
+        if (folderName == null || folderName.isBlank()) {
+            throw new BusinessException("文件夹名称不能为空");
+        }
+
+        // 检查同名文件夹是否已存在（复用 originalName 字段存储文件夹名称）
+        LambdaQueryWrapper<PrintFile> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(PrintFile::getIsFolder, true)
+                .eq(PrintFile::getOriginalName, folderName);
+
+        if (parentId == null) {
+            wrapper.isNull(PrintFile::getParentId);
+        } else {
+            wrapper.eq(PrintFile::getParentId, parentId);
+        }
+
+        PrintFile existing = this.getOne(wrapper, false);
+        if (existing != null) {
+            throw new BusinessException("该目录下已存在同名文件夹");
+        }
+
+        PrintFile folder = new PrintFile();
+        folder.setParentId(parentId);
+        folder.setIsFolder(true);
+        folder.setOriginalName(folderName); // 复用 originalName 字段存储文件夹名称
+        folder.setSafeName("folder_" + System.currentTimeMillis()); // 文件夹占位符
+        folder.setCreatedAt(LocalDateTime.now());
+
+        this.save(folder);
+        log.info("创建虚拟文件夹成功: folderId={}, parentId={}, name={}", folder.getId(), parentId, folderName);
+        return folder;
+    }
+
+    @Override
     public Page<PrintFile> pageFiles(PrintFileQueryDTO queryDTO) {
         Long userId = SecurityContextUtil.getCurrentUserId();
         Page<PrintFile> page = new Page<>(queryDTO.getPageNum(), queryDTO.getPageSize());

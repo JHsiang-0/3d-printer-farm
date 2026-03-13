@@ -5,6 +5,7 @@ import com.example.farm.common.api.Result;
 import com.example.farm.common.exception.BusinessException;
 import com.example.farm.entity.PrintFile;
 import com.example.farm.entity.dto.PrintFileQueryDTO;
+import com.example.farm.entity.dto.request.CreateFolderRequest;
 import com.example.farm.service.PrintFileService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -96,5 +97,35 @@ public class PrintFileController {
         }
         farmPrintFileService.batchDeleteFiles(ids);
         return Result.success(null, "批量删除成功");
+    }
+
+    // =============================================
+    // 虚拟目录管理接口
+    // =============================================
+
+    /**
+     * 获取指定目录下的文件和文件夹列表。
+     *
+     * @param parentId 父目录ID（不传或传null表示根目录）
+     * @return 目录内容列表（文件夹在前，文件按时间倒序）
+     */
+    @Operation(summary = "获取目录内容")
+    @GetMapping("/folder/content")
+    public Result<List<PrintFile>> getFolderContent(@RequestParam(required = false) Long parentId) {
+        List<PrintFile> contents = farmPrintFileService.getFolderContent(parentId);
+        return Result.success(contents, "获取目录内容成功");
+    }
+
+    /**
+     * 创建虚拟文件夹。
+     *
+     * @param req 创建请求（parentId, folderName）
+     * @return 创建的文件夹信息
+     */
+    @Operation(summary = "创建文件夹")
+    @PostMapping("/folder/create")
+    public Result<PrintFile> createFolder(@RequestBody CreateFolderRequest req) {
+        PrintFile folder = farmPrintFileService.createFolder(req.getParentId(), req.getFolderName());
+        return Result.success(folder, "文件夹创建成功");
     }
 }

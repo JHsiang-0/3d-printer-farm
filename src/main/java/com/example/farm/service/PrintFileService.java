@@ -7,10 +7,30 @@ import com.example.farm.entity.PrintFile;
 import com.example.farm.entity.dto.PrintFileQueryDTO;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.List;
+
 /**
  * 打印文件服务接口。
  */
 public interface PrintFileService extends IService<PrintFile> {
+
+    /**
+     * 获取指定目录下的所有文件夹和文件列表（扁平存储，虚拟目录）
+     *
+     * @param parentId 父目录ID（NULL 表示根目录）
+     * @return 目录下的文件和文件夹列表
+     */
+    List<PrintFile> getFolderContent(Long parentId);
+
+    /**
+     * 在指定目录下创建一个虚拟文件夹
+     *
+     * @param parentId  父目录ID（NULL 表示在根目录创建）
+     * @param folderName 文件夹名称
+     * @return 创建的文件夹实体
+     * @throws BusinessException 当名称为空或已存在同名文件夹时抛出
+     */
+    PrintFile createFolder(Long parentId, String folderName);
 
     /**
      * 分页查询当前用户的文件列表。

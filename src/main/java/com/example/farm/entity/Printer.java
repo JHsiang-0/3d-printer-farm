@@ -79,6 +79,14 @@ public class Printer implements Serializable {
     private String status;
 
     /**
+     * 热床是否已确认安全（0-未确认，1-已确认）
+     * 防范风险：每次派单后重置为 false，必须现场操作员确认后才能启动打印
+     */
+    @TableField("is_safe_to_print")
+    @Schema(description = "热床是否已确认安全（0-未确认，1-已确认）")
+    private Boolean isSafeToPrint;
+
+    /**
      * 当前正在执行的打印任务 ID
      */
     @TableField("current_job_id")

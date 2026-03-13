@@ -47,7 +47,7 @@ public class PrintJobServiceImpl extends ServiceImpl<PrintJobMapper, PrintJob> i
         job.setFileId(fileId);
         job.setUserId(userId);
         job.setPriority(priority != null ? priority : 0);
-        job.setStatus("QUEUED");
+        job.setStatus("PENDING");
         job.setProgress(BigDecimal.ZERO);
         this.save(job);
         log.info("提交打印任务成功: jobId={}, userId={}, fileId={}, priority={}", job.getId(), userId, fileId, job.getPriority());
@@ -57,7 +57,7 @@ public class PrintJobServiceImpl extends ServiceImpl<PrintJobMapper, PrintJob> i
     @Override
     public List<PrintJob> getQueuedJobs() {
         return this.list(new LambdaQueryWrapper<PrintJob>()
-                .in(PrintJob::getStatus, "QUEUED", "MANUAL")
+                .eq(PrintJob::getStatus, "PENDING")
                 .orderByDesc(PrintJob::getPriority)
                 .orderByAsc(PrintJob::getCreatedAt));
     }
@@ -82,24 +82,24 @@ public class PrintJobServiceImpl extends ServiceImpl<PrintJobMapper, PrintJob> i
             throw new BusinessException("所选的切片文件不存在");
         }
 
+        // 校验：切片文件不能是文件夹
+        if (Boolean.TRUE.equals(fileRecord.getIsFolder())) {
+            throw new BusinessException("不能对文件夹创建打印任务");
+        }
+
         PrintJob job = new PrintJob();
         job.setUserId(userId);
         job.setFileId(req.getFileId());
-        job.setFileUrl(fileRecord.getFileUrl());
-        job.setEstTime(fileRecord.getEstTime());
-        job.setMaterialType(req.getMaterialType() != null ? req.getMaterialType() : fileRecord.getMaterialType());
-        job.setNozzleSize(req.getNozzleSize() != null ? req.getNozzleSize() : fileRecord.getNozzleSize());
         job.setPriority(req.getPriority() != null ? req.getPriority() : 0);
         job.setProgress(BigDecimal.ZERO);
         job.setCreatedAt(LocalDateTime.now());
 
-        // 将“自动调度”和“人工确认后调度”拆成两个状态，便于前端和调度器精确协同。
-        job.setStatus(Boolean.TRUE.equals(req.getAutoAssign()) ? "QUEUED" : "MANUAL");
+        // 状态：PENDING（等待派发）
+        job.setStatus("PENDING");
 
         this.save(job);
         LogUtil.dataChange("创建打印任务", "FarmPrintJob", job.getId(),
-                String.format("用户=%d，调度方式=%s，材料=%s，喷嘴=%s",
-                        userId, job.getStatus(), job.getMaterialType(), job.getNozzleSize()));
+                String.format("用户=%d，文件ID=%d", userId, req.getFileId()));
         return job.getId();
     }
 
@@ -117,30 +117,28 @@ public class PrintJobServiceImpl extends ServiceImpl<PrintJobMapper, PrintJob> i
             log.warn("派发打印任务失败：打印机非空闲状态，jobId={}, printerId={}, status={}", jobId, printerId, printer.getStatus());
             throw new BusinessException("该打印机正在忙碌，无法派单");
         }
-        if (!"QUEUED".equals(job.getStatus()) && !"MANUAL".equals(job.getStatus())) {
+        if (!"PENDING".equals(job.getStatus())) {
             log.warn("派发打印任务失败：任务状态不支持派发，jobId={}, status={}", jobId, job.getStatus());
             throw new BusinessException("任务状态不支持派发");
         }
 
-        // 在下发前做材料与喷嘴校验，避免设备执行后才发现工艺不匹配导致中途失败。
-        if (job.getNozzleSize() != null && printer.getNozzleSize() != null
-                && job.getNozzleSize().compareTo(printer.getNozzleSize()) != 0) {
-            throw new BusinessException("喷嘴尺寸不匹配(" + job.getNozzleSize() + " vs " + printer.getNozzleSize() + ")");
-        }
-        if (job.getMaterialType() != null && printer.getCurrentMaterial() != null
-                && !job.getMaterialType().equalsIgnoreCase(printer.getCurrentMaterial())) {
-            throw new BusinessException("装载耗材不匹配(" + job.getMaterialType() + " vs " + printer.getCurrentMaterial() + ")");
-        }
-
+        // 从切片文件获取工艺参数，做材料与喷嘴校验
         PrintFile fileRecord = printFileMapper.selectById(job.getFileId());
         if (fileRecord == null) {
             throw new BusinessException("切片文件数据缺失");
         }
 
+        if (fileRecord.getNozzleSize() != null && printer.getNozzleSize() != null
+                && fileRecord.getNozzleSize().compareTo(printer.getNozzleSize()) != 0) {
+            throw new BusinessException("喷嘴尺寸不匹配(" + fileRecord.getNozzleSize() + " vs " + printer.getNozzleSize() + ")");
+        }
+        if (fileRecord.getMaterialType() != null && printer.getCurrentMaterial() != null
+                && !fileRecord.getMaterialType().equalsIgnoreCase(printer.getCurrentMaterial())) {
+            throw new BusinessException("装载耗材不匹配(" + fileRecord.getMaterialType() + " vs " + printer.getCurrentMaterial() + ")");
+        }
+
         String filename = fileRecord.getOriginalName();
-        String safeName = fileRecord.getSafeName() != null
-                ? fileRecord.getSafeName()
-                : job.getFileUrl().substring(job.getFileUrl().lastIndexOf("/") + 1);
+        String safeName = fileRecord.getSafeName();
 
         LogUtil.bizInfo("任务派发", "任务ID", jobId, "打印机ID", printerId, "文件名", filename);
 
@@ -165,5 +163,146 @@ public class PrintJobServiceImpl extends ServiceImpl<PrintJobMapper, PrintJob> i
 
         LogUtil.dataChange("启动打印任务", "FarmPrintJob", job.getId(), "已分配到打印机: " + printer.getName());
         return true;
+    }
+
+    // =============================================
+    // 安全打印流转核心方法实现（现场确认模式）
+    // =============================================
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void assignJob(Long jobId, Long printerId) {
+        PrintJob job = this.getById(jobId);
+        Printer printer = printerService.getById(printerId);
+
+        if (job == null) {
+            log.warn("派发任务失败：任务不存在，jobId={}", jobId);
+            throw new BusinessException("任务不存在");
+        }
+        if (printer == null) {
+            log.warn("派发任务失败：打印机不存在，printerId={}", printerId);
+            throw new BusinessException("打印机不存在");
+        }
+
+        // 校验 1：Job 必须处于 PENDING 状态
+        if (!"PENDING".equals(job.getStatus())) {
+            log.warn("派发任务失败：任务状态不支持派发，jobId={}, status={}", jobId, job.getStatus());
+            throw new BusinessException("任务当前状态为 [" + job.getStatus() + "]，仅 PENDING 状态可派发");
+        }
+
+        // 校验 2：打印机必须处于 IDLE 状态
+        if (!"IDLE".equals(printer.getStatus())) {
+            log.warn("派发任务失败：打印机非空闲，printerId={}, status={}", printerId, printer.getStatus());
+            throw new BusinessException("打印机 [" + printer.getName() + "] 当前忙碌，无法派单");
+        }
+
+        // 行为：将 Job 的 printerId 设为目标机器，状态改为 ASSIGNED
+        job.setPrinterId(printerId);
+        job.setStatus("ASSIGNED");
+        this.updateById(job);
+
+        // 行为：将目标 Printer 的 is_safe_to_print 重置为 false（防范风险）
+        printer.setIsSafeToPrint(false);
+        printer.setCurrentJobId(jobId);
+        printerService.updateById(printer);
+
+        LogUtil.bizInfo("任务派发（安全模式）", "任务ID", jobId, "打印机ID", printerId, "打印机名称", printer.getName());
+        log.info("派发任务成功（已重置安全标记）: jobId={}, printerId={}", jobId, printerId);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void confirmPrinterSafe(Long printerId, Long operatorId) {
+        Printer printer = printerService.getById(printerId);
+
+        if (printer == null) {
+            log.warn("确认打印机安全失败：打印机不存在，printerId={}", printerId);
+            throw new BusinessException("打印机不存在");
+        }
+
+        // 行为：将 Printer 的 is_safe_to_print 设为 true
+        printer.setIsSafeToPrint(true);
+        printerService.updateById(printer);
+
+        String operatorInfo = operatorId != null ? "operatorId=" + operatorId : "operator=system";
+        LogUtil.bizInfo("现场确认安全", "打印机ID", printerId, "打印机名称", printer.getName(), "操作员", operatorInfo);
+        log.info("现场确认打印机安全: printerId={}, operatorId={}", printerId, operatorId);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void startPrint(Long jobId, Long operatorId) {
+        if (operatorId == null) {
+            throw new BusinessException("启动打印必须记录操作员ID");
+        }
+
+        PrintJob job = this.getById(jobId);
+        if (job == null) {
+            log.warn("启动打印失败：任务不存在，jobId={}", jobId);
+            throw new BusinessException("任务不存在");
+        }
+
+        // 校验 1：Job 必须处于 ASSIGNED 状态
+        if (!"ASSIGNED".equals(job.getStatus())) {
+            log.warn("启动打印失败：任务状态不正确，jobId={}, status={}", jobId, job.getStatus());
+            throw new BusinessException("任务当前状态为 [" + job.getStatus() + "]，仅 ASSIGNED 状态可启动打印");
+        }
+
+        Long printerId = job.getPrinterId();
+        Printer printer = printerService.getById(printerId);
+        if (printer == null) {
+            log.warn("启动打印失败：打印机不存在，printerId={}", printerId);
+            throw new BusinessException("打印机不存在");
+        }
+
+        // 校验 2：Printer 的 is_safe_to_print 必须为 true
+        if (!Boolean.TRUE.equals(printer.getIsSafeToPrint())) {
+            log.warn("启动打印失败：热床未确认安全，jobId={}, printerId={}, isSafeToPrint={}",
+                    jobId, printerId, printer.getIsSafeToPrint());
+            throw new BusinessException("热床未确认安全，禁止打印！请先在现场确认清理完毕后再试");
+        }
+
+        // 获取文件信息
+        PrintFile fileRecord = printFileMapper.selectById(job.getFileId());
+        if (fileRecord == null) {
+            throw new BusinessException("切片文件数据缺失");
+        }
+
+        String filename = fileRecord.getOriginalName();
+        String safeName = fileRecord.getSafeName() != null
+                ? fileRecord.getSafeName()
+                : filename;
+
+        // 调用 Moonraker 接口上传并启动打印
+        try {
+            org.springframework.core.io.Resource fileStream = rustFsClient.getFileStream(safeName);
+            if (fileStream == null) {
+                throw new BusinessException("无法从对象存储中读取切片文件");
+            }
+
+            boolean isSuccess = moonrakerApiClient.uploadAndPrint(printer.getIpAddress(), fileStream, filename);
+            if (!isSuccess) {
+                throw new BusinessException("物理机接收文件超时或失败，请检查打印机网络连接");
+            }
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("启动打印失败：Moonraker 调用异常，jobId={}, printerId={}", jobId, printerId, e);
+            throw new BusinessException("启动打印失败：" + e.getMessage());
+        }
+
+        // 行为：将 Job 状态改为 PRINTING，记录 operatorId
+        job.setStatus("PRINTING");
+        job.setOperatorId(operatorId);
+        job.setStartedAt(LocalDateTime.now());
+        this.updateById(job);
+
+        // 行为：将 Printer 的 is_safe_to_print 再次置为 false，状态改为 PRINTING
+        printer.setStatus("PRINTING");
+        printer.setIsSafeToPrint(false);
+        printerService.updateById(printer);
+
+        LogUtil.bizInfo("现场启动打印", "任务ID", jobId, "打印机ID", printerId, "操作员ID", operatorId, "文件名", filename);
+        log.info("现场启动打印成功: jobId={}, printerId={}, operatorId={}", jobId, printerId, operatorId);
     }
 }
