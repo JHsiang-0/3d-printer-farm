@@ -1,14 +1,19 @@
 package com.example.farm.controller;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.farm.common.api.Result;
 import com.example.farm.common.exception.BusinessException;
 import com.example.farm.common.utils.SecurityContextUtil;
 import com.example.farm.entity.PrintJob;
+import com.example.farm.entity.Printer;
 import com.example.farm.entity.dto.PrintJobCreateDTO;
 import com.example.farm.entity.dto.request.AssignJobRequest;
 import com.example.farm.entity.dto.request.ConfirmSafeRequest;
+import com.example.farm.entity.dto.request.PrintJobQueryDTO;
 import com.example.farm.entity.dto.request.StartPrintJobRequest;
 import com.example.farm.service.PrintJobService;
+import com.example.farm.service.PrinterService;
+import com.example.farm.common.utils.MoonrakerApiClient;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +33,8 @@ import java.util.List;
 public class PrintJobController {
 
     private final PrintJobService printJobService;
+    private final PrinterService printerService;
+    private final MoonrakerApiClient moonrakerApiClient;
 
     /**
      * 查询排队中的任务。
@@ -38,6 +45,34 @@ public class PrintJobController {
     @GetMapping("/queue")
     public Result<List<PrintJob>> getQueue() {
         return Result.success(printJobService.getQueuedJobs());
+    }
+
+    /**
+     * 分页查询打印任务列表（支持多条件过滤）
+     *
+     * @param queryDTO 查询条件
+     * @return 分页结果
+     */
+    @Operation(summary = "分页查询打印任务列表")
+    @PostMapping("/page")
+    public Result<Page<PrintJob>> queryJobs(@RequestBody PrintJobQueryDTO queryDTO) {
+        return Result.success(printJobService.queryJobs(queryDTO));
+    }
+
+    /**
+     * 获取单个打印任务详情
+     *
+     * @param id 任务ID
+     * @return 任务详情
+     */
+    @Operation(summary = "获取打印任务详情")
+    @GetMapping("/{id}")
+    public Result<PrintJob> getById(@PathVariable Long id) {
+        PrintJob job = printJobService.getById(id);
+        if (job == null) {
+            throw new BusinessException("任务不存在");
+        }
+        return Result.success(job);
     }
 
     /**
@@ -56,7 +91,9 @@ public class PrintJobController {
     }
 
     /**
-     * 取消任务（仅允许取消等待中的任务）。
+     * 取消任务
+     * - PENDING/QUEUED: 未分配打印机，直接取消
+     * - ASSIGNED/READY/PAUSED: 已分配打印机，需调用 Moonraker 接口取消打印，并解绑机器
      *
      * @param id 任务 ID
      * @return 取消结果
@@ -66,13 +103,45 @@ public class PrintJobController {
     @DeleteMapping("/{id}")
     public Result<String> cancelJob(@PathVariable Long id) {
         PrintJob job = printJobService.getById(id);
-        if (job != null && "PENDING".equals(job.getStatus())) {
-            job.setStatus("CANCELED");
-            printJobService.updateById(job);
-            log.info("取消打印任务成功: jobId={}", id);
-            return Result.success(null, "任务已取消");
+        if (job == null) {
+            throw new BusinessException("任务不存在");
         }
-        throw new BusinessException("仅等待中的任务允许取消");
+
+        String status = job.getStatus();
+        Long printerId = job.getPrinterId();
+
+        // 检查是否在可取消状态列表中
+        if (!"PENDING".equals(status) && !"QUEUED".equals(status)
+                && !"ASSIGNED".equals(status) && !"READY".equals(status)
+                && !"PAUSED".equals(status)) {
+            throw new BusinessException("当前状态为 [" + status + "]，不允许取消");
+        }
+
+        // 如果任务已分配到打印机，需要先取消打印并解绑机器
+        if (printerId != null) {
+            Printer printer = printerService.getById(printerId);
+            if (printer != null && printer.getIpAddress() != null) {
+                // 调用 Moonraker 接口取消打印
+                boolean cancelled = moonrakerApiClient.cancelPrint(printer.getIpAddress());
+                if (!cancelled) {
+                    log.warn("取消打印机上的打印任务失败: jobId={}, printerId={}, ip={}",
+                            id, printerId, printer.getIpAddress());
+                }
+            }
+
+            // 解绑机器：清除 currentJobId，重置 isSafeToPrint
+            printer.setCurrentJobId(null);
+            printer.setIsSafeToPrint(false);
+            printerService.updateById(printer);
+            log.info("已解绑打印机: jobId={}, printerId={}", id, printerId);
+        }
+
+        // 更新任务状态为 CANCELLED
+        job.setStatus("CANCELLED");
+        printJobService.updateById(job);
+
+        log.info("取消打印任务成功: jobId={}, 原状态={}", id, status);
+        return Result.success(null, "任务已取消");
     }
 
     /**
@@ -150,8 +219,10 @@ public class PrintJobController {
         if (operatorId == null) {
             operatorId = SecurityContextUtil.getCurrentUserId();
         }
-        printJobService.startPrint(req.getJobId(), operatorId);
-        log.info("现场启动打印成功: jobId={}, operatorId={}", req.getJobId(), operatorId);
-        return Result.success(null, "打印任务已启动");
+        String action = req.getAction();
+        printJobService.startPrint(req.getJobId(), operatorId, action);
+        String msg = "START_PRINT".equalsIgnoreCase(action) ? "打印任务已启动" : "文件已上传到机器";
+        log.info("现场启动打印成功: jobId={}, operatorId={}, action={}", req.getJobId(), operatorId, action);
+        return Result.success(null, msg);
     }
 }

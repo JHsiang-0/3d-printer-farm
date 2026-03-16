@@ -3,9 +3,11 @@ package com.example.farm.task;
 import com.example.farm.common.utils.LogUtil;
 import com.example.farm.controller.WebSocketServer;
 import com.example.farm.entity.Printer;
+import com.example.farm.entity.PrintJob;
 import com.example.farm.entity.dto.MoonrakerStatusDTO;
 import com.example.farm.service.PrinterService;
 import com.example.farm.service.PrinterCacheService;
+import com.example.farm.service.PrintJobService;
 import com.example.farm.common.utils.MoonrakerApiClient;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
@@ -13,6 +15,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,6 +37,7 @@ public class PrinterMonitorTask {
     private final PrinterService printerService;
     private final PrinterCacheService printerCacheService;
     private final MoonrakerApiClient moonrakerApiClient;
+    private final PrintJobService printJobService;
 
     // 并发线程池，用于并行查询多个打印机状态
     private final ExecutorService executorService = Executors.newFixedThreadPool(10);
@@ -158,7 +163,32 @@ public class PrinterMonitorTask {
         printerCacheService.recordStatusHistory(printerId, status);
         printerCacheService.markPrinterOnline(printerId);
 
-        // 检查状态变更
+        // 获取 Moonraker 状态（已降维）
+        String moonrakerState = status.getState().toLowerCase();
+
+        // ========== 核心业务逻辑：农场任务 vs 野生任务 ==========
+        if ("printing".equals(moonrakerState)) {
+            if (printer.getCurrentJobId() != null) {
+                // 农场任务：同步打印进度
+                syncPrintJobStatus(printer, status);
+            } else {
+                // 野生任务：锁定机器，防止被自动调度抢单
+                if (!"PRINTING".equals(printer.getStatus())) {
+                    updatePrinterStatus(printer, "PRINTING");
+                    log.info("发现单机直连打印任务，锁定机器: {}", printer.getName());
+                }
+            }
+        } else if (("complete".equals(moonrakerState) || "standby".equals(moonrakerState) || "ready".equals(moonrakerState))
+                && printer.getCurrentJobId() == null && "PRINTING".equals(printer.getStatus())) {
+            // 野生任务结束：释放机器
+            updatePrinterStatus(printer, "IDLE");
+            log.info("单机直连打印任务结束，释放机器: {}", printer.getName());
+        } else if (printer.getCurrentJobId() != null) {
+            // 农场任务：其他状态同步（complete/error/cancelled/paused）
+            syncPrintJobStatus(printer, status);
+        }
+
+        // 检查状态变更（保留原有逻辑，更新数据库状态）
         String newDbStatus = determineDbStatus(status.getState());
         if (!newDbStatus.equals(printer.getStatus())) {
             updatePrinterStatus(printer, newDbStatus);
@@ -166,6 +196,97 @@ public class PrinterMonitorTask {
 
         // 记录慢查询
         LogUtil.slowOperation("fetchPrinterStatus", duration, SLOW_THRESHOLD_MS);
+    }
+
+    /**
+     * 同步打印任务状态（农场任务专用）
+     * 根据 Moonraker 状态更新 PrintJob 表，并在任务结束时解绑机器
+     */
+    private void syncPrintJobStatus(Printer printer, MoonrakerStatusDTO status) {
+        Long jobId = printer.getCurrentJobId();
+        if (jobId == null) {
+            return;
+        }
+
+        PrintJob job = printJobService.getById(jobId);
+        if (job == null) {
+            log.warn("同步任务状态失败：任务不存在，jobId={}", jobId);
+            return;
+        }
+
+        String state = status.getState().toLowerCase();
+        Double progress = status.getProgress();
+        boolean jobChanged = false;
+
+        switch (state) {
+            case "printing":
+                // 更新进度（差值大于 1.0% 时才更新）
+                if (progress != null) {
+                    BigDecimal newProgress = BigDecimal.valueOf(progress);
+                    BigDecimal oldProgress = job.getProgress() != null ? job.getProgress() : BigDecimal.ZERO;
+                    if (newProgress.subtract(oldProgress).doubleValue() > 1.0) {
+                        job.setProgress(newProgress);
+                        jobChanged = true;
+                    }
+                }
+                break;
+
+            case "complete":
+                // 任务完成
+                job.setStatus("COMPLETED");
+                job.setProgress(BigDecimal.valueOf(100));
+                job.setCompletedAt(LocalDateTime.now());
+                jobChanged = true;
+
+                // 解绑机器
+                printer.setCurrentJobId(null);
+                printer.setIsSafeToPrint(false);
+                printerService.updateById(printer);
+                log.info("打印任务完成，已解绑机器: jobId={}, printerId={}", jobId, printer.getId());
+                break;
+
+            case "error":
+                // 任务失败
+                job.setStatus("FAILED");
+                job.setCompletedAt(LocalDateTime.now());
+                job.setErrorReason("打印出错");
+                jobChanged = true;
+
+                // 解绑机器
+                printer.setCurrentJobId(null);
+                printerService.updateById(printer);
+                log.info("打印任务失败，已解绑机器: jobId={}, printerId={}", jobId, printer.getId());
+                break;
+
+            case "cancelled":
+                // 任务取消
+                job.setStatus("CANCELLED");
+                job.setCompletedAt(LocalDateTime.now());
+                job.setErrorReason("用户取消");
+                jobChanged = true;
+
+                // 解绑机器
+                printer.setCurrentJobId(null);
+                printerService.updateById(printer);
+                log.info("打印任务失败/取消，已解绑机器: jobId={}, printerId={}, state={}", jobId, printer.getId(), state);
+                break;
+
+            case "paused":
+                // 暂停（需 PrintJob 支持 PAUSED 状态）
+                if (!"PAUSED".equals(job.getStatus())) {
+                    job.setStatus("PAUSED");
+                    jobChanged = true;
+                }
+                break;
+
+            default:
+                break;
+        }
+
+        // 保存任务变更
+        if (jobChanged) {
+            printJobService.updateById(job);
+        }
     }
 
     private void updatePrinterStatus(Printer printer, String newStatus) {

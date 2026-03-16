@@ -190,6 +190,24 @@ public class MoonrakerApiClient {
         }
     }
 
+    /**
+     * 取消当前打印任务
+     *
+     * @param ipAddress 打印机 IP 地址
+     * @return 是否成功
+     */
+    public boolean cancelPrint(String ipAddress) {
+        String url = String.format("http://%s:7125/printer/print/cancel", ipAddress);
+        try {
+            restClient.post().uri(url).retrieve().toBodilessEntity();
+            log.info("已发送取消打印指令: 打印机IP={}", ipAddress);
+            return true;
+        } catch (Exception e) {
+            log.error("发送取消打印指令失败: 打印机IP={}，原因={}", ipAddress, e.getMessage());
+            return false;
+        }
+    }
+
     public boolean uploadAndPrint(String ipAddress, org.springframework.core.io.Resource gcodeResource, String filename) {
         // 你的原有逻辑
         String targetUrl = String.format("http://%s:7125/server/files/upload", ipAddress);
@@ -213,5 +231,43 @@ public class MoonrakerApiClient {
             log.error("打印任务下发失败: 打印机IP={}，原因={}", ipAddress, e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * 上传 G-code 文件到 Moonraker，可选是否立即开始打印
+     *
+     * @param ipAddress   打印机 IP 地址
+     * @param apiKey      API Key（可选，为空时不设置请求头）
+     * @param gcodeResource G-code 文件资源
+     * @param filename    文件名
+     * @param startPrint  是否立即开始打印
+     * @return 是否成功
+     * @throws Exception 连接失败时抛出异常
+     */
+    public boolean uploadFile(String ipAddress, String apiKey,
+                              org.springframework.core.io.Resource gcodeResource,
+                              String filename, boolean startPrint) throws Exception {
+        String targetUrl = String.format("http://%s:7125/server/files/upload", ipAddress);
+
+        org.springframework.util.MultiValueMap<String, Object> body = new org.springframework.util.LinkedMultiValueMap<>();
+        body.add("file", gcodeResource);
+        body.add("filename", filename != null ? filename : "farm_print.gcode");
+        body.add("print", startPrint ? "true" : "false");
+
+        log.info("上传文件到打印机: ip={}, filename={}, startPrint={}", ipAddress, filename, startPrint);
+
+        var requestBuilder = restClient.post()
+                .uri(targetUrl)
+                .contentType(org.springframework.http.MediaType.MULTIPART_FORM_DATA)
+                .body(body);
+
+        // 添加 API Key 请求头（如果提供）
+        if (apiKey != null && !apiKey.isEmpty()) {
+            requestBuilder.header("X-Api-Key", apiKey);
+        }
+
+        String response = requestBuilder.retrieve().body(String.class);
+        log.info("文件上传响应: ip={}, response={}", ipAddress, response);
+        return true;
     }
 }

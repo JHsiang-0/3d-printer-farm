@@ -1,6 +1,7 @@
 package com.example.farm.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.example.farm.common.exception.BusinessException;
 import com.example.farm.common.utils.LogUtil;
@@ -11,6 +12,7 @@ import com.example.farm.entity.PrintFile;
 import com.example.farm.entity.PrintJob;
 import com.example.farm.entity.Printer;
 import com.example.farm.entity.dto.PrintJobCreateDTO;
+import com.example.farm.entity.dto.request.PrintJobQueryDTO;
 import com.example.farm.mapper.PrintFileMapper;
 import com.example.farm.mapper.PrintJobMapper;
 import com.example.farm.service.PrintJobService;
@@ -231,10 +233,13 @@ public class PrintJobServiceImpl extends ServiceImpl<PrintJobMapper, PrintJob> i
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void startPrint(Long jobId, Long operatorId) {
+    public void startPrint(Long jobId, Long operatorId, String action) {
         if (operatorId == null) {
             throw new BusinessException("启动打印必须记录操作员ID");
         }
+
+        // 解析 action，默认 START_PRINT
+        boolean startPrint = !"UPLOAD_ONLY".equalsIgnoreCase(action);
 
         PrintJob job = this.getById(jobId);
         if (job == null) {
@@ -255,8 +260,8 @@ public class PrintJobServiceImpl extends ServiceImpl<PrintJobMapper, PrintJob> i
             throw new BusinessException("打印机不存在");
         }
 
-        // 校验 2：Printer 的 is_safe_to_print 必须为 true
-        if (!Boolean.TRUE.equals(printer.getIsSafeToPrint())) {
+        // 校验 2：Printer 的 is_safe_to_print 必须为 true（仅在 START_PRINT 时校验）
+        if (startPrint && !Boolean.TRUE.equals(printer.getIsSafeToPrint())) {
             log.warn("启动打印失败：热床未确认安全，jobId={}, printerId={}, isSafeToPrint={}",
                     jobId, printerId, printer.getIsSafeToPrint());
             throw new BusinessException("热床未确认安全，禁止打印！请先在现场确认清理完毕后再试");
@@ -273,36 +278,78 @@ public class PrintJobServiceImpl extends ServiceImpl<PrintJobMapper, PrintJob> i
                 ? fileRecord.getSafeName()
                 : filename;
 
-        // 调用 Moonraker 接口上传并启动打印
+        // 调用 Moonraker 接口上传文件
         try {
             org.springframework.core.io.Resource fileStream = rustFsClient.getFileStream(safeName);
             if (fileStream == null) {
                 throw new BusinessException("无法从对象存储中读取切片文件");
             }
 
-            boolean isSuccess = moonrakerApiClient.uploadAndPrint(printer.getIpAddress(), fileStream, filename);
-            if (!isSuccess) {
-                throw new BusinessException("物理机接收文件超时或失败，请检查打印机网络连接");
-            }
-        } catch (BusinessException e) {
-            throw e;
+            // 使用新的 uploadFile 方法，支持 API Key 和控制是否立即打印
+            moonrakerApiClient.uploadFile(printer.getIpAddress(), printer.getApiKey(), fileStream, filename, startPrint);
         } catch (Exception e) {
-            log.error("启动打印失败：Moonraker 调用异常，jobId={}, printerId={}", jobId, printerId, e);
-            throw new BusinessException("启动打印失败：" + e.getMessage());
+            log.error("文件上传失败：Moonraker 调用异常，jobId={}, printerId={}, ip={}", jobId, printerId, printer.getIpAddress(), e);
+            throw new BusinessException("机器连接失败，请检查网络：" + e.getMessage());
         }
 
-        // 行为：将 Job 状态改为 PRINTING，记录 operatorId
-        job.setStatus("PRINTING");
-        job.setOperatorId(operatorId);
-        job.setStartedAt(LocalDateTime.now());
-        this.updateById(job);
+        // 根据 action 决定状态
+        if (startPrint) {
+            // 行为：将 Job 状态改为 PRINTING，记录 operatorId
+            job.setStatus("PRINTING");
+            job.setOperatorId(operatorId);
+            job.setStartedAt(LocalDateTime.now());
+            this.updateById(job);
 
-        // 行为：将 Printer 的 is_safe_to_print 再次置为 false，状态改为 PRINTING
-        printer.setStatus("PRINTING");
-        printer.setIsSafeToPrint(false);
-        printerService.updateById(printer);
+            // 行为：将 Printer 的 is_safe_to_print 再次置为 false，状态改为 PRINTING
+            printer.setStatus("PRINTING");
+            printer.setIsSafeToPrint(false);
+            printerService.updateById(printer);
 
-        LogUtil.bizInfo("现场启动打印", "任务ID", jobId, "打印机ID", printerId, "操作员ID", operatorId, "文件名", filename);
-        log.info("现场启动打印成功: jobId={}, printerId={}, operatorId={}", jobId, printerId, operatorId);
+            LogUtil.bizInfo("现场启动打印", "任务ID", jobId, "打印机ID", printerId, "操作员ID", operatorId, "文件名", filename);
+            log.info("现场启动打印成功: jobId={}, printerId={}, operatorId={}", jobId, printerId, operatorId);
+        } else {
+            // UPLOAD_ONLY: 仅上传文件，状态改为 READY（就绪待机）
+            job.setStatus("READY");
+            job.setOperatorId(operatorId);
+            this.updateById(job);
+
+            // 打印机状态保持 IDLE（等待手动在机器上点击打印）
+            printer.setIsSafeToPrint(false);
+            printerService.updateById(printer);
+
+            LogUtil.bizInfo("文件上传到机器（待机）", "任务ID", jobId, "打印机ID", printerId, "操作员ID", operatorId, "文件名", filename);
+            log.info("文件已上传到机器（待机）: jobId={}, printerId={}, operatorId={}", jobId, printerId, operatorId);
+        }
+    }
+
+    @Override
+    public Page<PrintJob> queryJobs(PrintJobQueryDTO queryDTO) {
+        int pageNum = queryDTO.getPageNum() != null ? queryDTO.getPageNum() : 1;
+        int pageSize = queryDTO.getPageSize() != null ? queryDTO.getPageSize() : 10;
+
+        LambdaQueryWrapper<PrintJob> wrapper = new LambdaQueryWrapper<>();
+
+        // 状态精确匹配
+        wrapper.eq(queryDTO.getStatus() != null && !queryDTO.getStatus().isEmpty(),
+                PrintJob::getStatus, queryDTO.getStatus());
+
+        // 打印机ID精确匹配
+        wrapper.eq(queryDTO.getPrinterId() != null,
+                PrintJob::getPrinterId, queryDTO.getPrinterId());
+
+        // 用户ID精确匹配
+        wrapper.eq(queryDTO.getUserId() != null,
+                PrintJob::getUserId, queryDTO.getUserId());
+
+        // 创建时间范围查询
+        wrapper.ge(queryDTO.getStartTime() != null,
+                PrintJob::getCreatedAt, queryDTO.getStartTime());
+        wrapper.le(queryDTO.getEndTime() != null,
+                PrintJob::getCreatedAt, queryDTO.getEndTime());
+
+        // 按创建时间降序排列
+        wrapper.orderByDesc(PrintJob::getCreatedAt);
+
+        return this.page(new Page<>(pageNum, pageSize), wrapper);
     }
 }

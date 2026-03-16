@@ -1,9 +1,11 @@
 package com.example.farm.service;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.example.farm.common.exception.BusinessException;
 import com.example.farm.entity.PrintJob;
 import com.example.farm.entity.dto.PrintJobCreateDTO;
+import com.example.farm.entity.dto.request.PrintJobQueryDTO;
 
 import java.util.List;
 
@@ -95,7 +97,16 @@ public interface PrintJobService extends IService<PrintJob> {
      *
      * @param jobId      任务 ID
      * @param operatorId 操作员 ID（必填，记录谁启动了打印）
+     * @param action     执行动作：START_PRINT（下发并打印）或 UPLOAD_ONLY（仅上传）
      * @throws BusinessException 当状态校验不通过或 Moonraker 调用失败时抛出
      */
-    void startPrint(Long jobId, Long operatorId);
+    void startPrint(Long jobId, Long operatorId, String action);
+
+    /**
+     * 分页查询打印任务列表（支持多条件过滤）
+     *
+     * @param queryDTO 查询条件
+     * @return 分页结果
+     */
+    Page<PrintJob> queryJobs(PrintJobQueryDTO queryDTO);
 }
