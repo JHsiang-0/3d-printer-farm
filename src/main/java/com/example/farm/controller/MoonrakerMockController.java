@@ -61,11 +61,43 @@ public class MoonrakerMockController {
 
         Map<String, Object> result = new HashMap<>();
         Map<String, Object> serverInfo = new HashMap<>();
-        serverInfo.put("moonraker_version", "v0.8.0");
-        serverInfo.put("klipper_path", "/home/pi/klipper");
-        serverInfo.put("klipper_version", "v0.12.0");
-        serverInfo.put("api_version", "v1");
-        serverInfo.put("api_version_string", "v1");
+
+        // Klipper 连接状态
+        serverInfo.put("klippy_connected", true);
+        serverInfo.put("klippy_state", "ready");
+
+        // 组件列表
+        serverInfo.put("components", java.util.Arrays.asList(
+            "secrets", "template", "klippy_connection", "jsonrpc",
+            "internal_transport", "application", "websockets", "database",
+            "dbus_manager", "file_manager", "authorization", "klippy_apis",
+            "shell_command", "machine", "data_store", "proc_stats",
+            "job_state", "job_queue", "history", "http_client",
+            "announcements", "webcam", "extensions", "octoprint_compat",
+            "update_manager"
+        ));
+
+        // 失败组件
+        serverInfo.put("failed_components", java.util.Collections.emptyList());
+
+        // 注册目录
+        serverInfo.put("registered_directories", java.util.Arrays.asList(
+            "config", "logs", "gcodes", "config_examples", "docs"
+        ));
+
+        // 警告信息
+        serverInfo.put("warnings", java.util.Collections.emptyList());
+
+        // WebSocket 连接数
+        serverInfo.put("websocket_count", 1);
+
+        // Moonraker 版本信息
+        serverInfo.put("moonraker_version", "v0.9.3-130-g5b92e52");
+        serverInfo.put("missing_klippy_requirements", java.util.Collections.emptyList());
+
+        // API 版本 (数组格式)
+        serverInfo.put("api_version", java.util.Arrays.asList(1, 5, 0));
+        serverInfo.put("api_version_string", "1.5.0");
 
         result.put("result", serverInfo);
         log.debug("Moonraker /server/info called");
@@ -83,10 +115,28 @@ public class MoonrakerMockController {
 
         Map<String, Object> result = new HashMap<>();
         Map<String, Object> printerInfo = new HashMap<>();
+
+        // 打印机状态
         printerInfo.put("state", "ready");
         printerInfo.put("state_message", "Printer is ready");
-        printerInfo.put("hostname", "farm-printer");
-        printerInfo.put("software_version", "v0.12.0");
+
+        // 主机信息
+        printerInfo.put("hostname", "klipper");
+        printerInfo.put("klipper_path", "/home/klipper/klipper");
+        printerInfo.put("python_path", "/home/klipper/klippy-env/bin/python");
+
+        // 进程信息
+        printerInfo.put("process_id", 1270);
+        printerInfo.put("user_id", 1000);
+        printerInfo.put("group_id", 1000);
+
+        // 日志和配置文件路径
+        printerInfo.put("log_file", "/home/klipper/printer_data/logs/klippy.log");
+        printerInfo.put("config_file", "/home/klipper/printer_data/config/printer.cfg");
+
+        // 软件版本和硬件信息
+        printerInfo.put("software_version", "v0.13.0-433-gdc622f4a");
+        printerInfo.put("cpu_info", "4 core ?");
 
         result.put("result", printerInfo);
         log.debug("Moonraker /printer/info called");
@@ -149,7 +199,7 @@ public class MoonrakerMockController {
                 PrintJobCreateDTO jobReq = new PrintJobCreateDTO();
                 jobReq.setFileId(printFile.getId());
                 jobReq.setPriority(0);
-                jobReq.setAutoAssign(true);
+//                jobReq.setAutoAssign(true);
 
                 // 使用默认用户 ID (切片软件上传时没有用户上下文)
                 // 这里可以从 API Key 中提取用户信息，目前简化为使用系统默认
